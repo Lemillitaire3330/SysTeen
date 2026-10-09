@@ -20,7 +20,7 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.5.2"
+VERSION = "0.6.0"
 
 # =============================================================
 # MISE A JOUR SECURISEE
@@ -67,6 +67,10 @@ PGP_FINGERPRINT = "F7FEE16BFE36DEAE35079EFF0FDD49DB07AC253E"
 
 UPDATE_SCRIPT_ASSET = "systeen.py"
 UPDATE_SIGNATURE_ASSET = "systeen.py.asc"
+
+# README.md : téléchargé et vérifié avec la même clé que systeen.py
+UPDATE_README_ASSET = "README.md"
+UPDATE_README_SIGNATURE_ASSET = "README.md.asc"
 
 
 class SysTeenError(Exception):
@@ -126,6 +130,9 @@ class SysTeen:
     def __init__(self, script_path=None):
         # Chemin du programme SysTeen lui-même (cible des mises à jour)
         self.program_path = Path(__file__).resolve()
+
+        # Chemin du README.md installé à côté du programme
+        self.readme_path = self.program_path.parent / "README.md"
 
         # Redémarrer SysTeen après une mise à jour réussie
         # (désactivé en mode "python systeen.py --maj")
@@ -1132,6 +1139,38 @@ class SysTeen:
         subprocess.run(["systemctl", "poweroff"], check=False)
 
     # =========================================================
+    # README
+    # =========================================================
+
+    def command_readme(self):
+        """
+        python systeen.py --readme
+            Affiche le README.md installé (vérifié par PGP
+            lors de la dernière mise à jour).
+        """
+
+        if not self.readme_path.is_file():
+            raise SysTeenError(
+                "README.md introuvable à côté de systeen.py.\n"
+                "Lancez : python systeen.py --maj"
+            )
+
+        try:
+            text = self.readme_path.read_text(encoding="utf-8")
+
+        except UnicodeDecodeError:
+            raise SysTeenError(
+                "Le README.md n'est pas un fichier UTF-8 valide."
+            )
+
+        except OSError as error:
+            raise SysTeenError(
+                f"Impossible de lire le README.md : {error}"
+            )
+
+        print(text)
+
+    # =========================================================
     # MISE A JOUR / VERSION
     # =========================================================
 
@@ -1353,19 +1392,21 @@ class SysTeen:
         return statuses
 
     @staticmethod
-    def _check_signature_file(signature_file):
+    def _check_signature_file(signature_file, signed_name="systeen.py"):
         """Détecte les erreurs classiques sur le fichier .asc."""
         head = Path(signature_file).read_bytes()[:200].lstrip()
 
         if not head:
-            raise SysTeenError("Le fichier de signature est vide.")
+            raise SysTeenError(
+                f"Le fichier de signature de {signed_name} est vide."
+            )
 
         if head.startswith(b"-----BEGIN PGP SIGNED MESSAGE-----"):
             raise SysTeenError(
                 "Le fichier .asc est une signature 'clearsign' "
                 "et non une signature détachée.\n"
                 "Recréez-la avec : "
-                "gpg --armor --detach-sign systeen.py"
+                f"gpg --armor --detach-sign {signed_name}"
             )
 
         if head.startswith(b"-----BEGIN PGP MESSAGE-----"):
@@ -1373,7 +1414,7 @@ class SysTeen:
                 "Le fichier .asc contient un message PGP (--sign) "
                 "et non une signature détachée.\n"
                 "Recréez-la avec : "
-                "gpg --armor --detach-sign systeen.py"
+                f"gpg --armor --detach-sign {signed_name}"
             )
 
         if head.startswith(b"<") or head.lower().startswith(b"not found"):
@@ -1387,8 +1428,16 @@ class SysTeen:
         public_key_file,
         signature_file,
         script_file,
-        gpg_home
+        gpg_home,
+        signed_name="systeen.py"
     ):
+        """
+        Vérifie une signature détachée avec la clé intégrée.
+
+        Sert aussi bien pour systeen.py que pour README.md
+        (même clé, même empreinte).
+        """
+
         gpg = shutil.which("gpg")
 
         if gpg is None:
@@ -1414,7 +1463,7 @@ class SysTeen:
             "--homedir", str(gpg_home),
         ]
 
-        self._check_signature_file(signature_file)
+        self._check_signature_file(signature_file, signed_name)
 
         # 1) Import de la clé publique
         code, out, err = self._run_gpg(
@@ -1501,10 +1550,11 @@ class SysTeen:
 
         if "BADSIG" in names:
             raise SysTeenError(
-                "SIGNATURE PGP INVALIDE : le fichier ne correspond "
-                "pas à celui qui a été signé.\n"
-                "Si vous avez modifié systeen.py après la signature, "
-                "resignez-le puis republiez les deux assets.\n"
+                f"SIGNATURE PGP INVALIDE : {signed_name} ne "
+                "correspond pas à celui qui a été signé.\n"
+                f"Si vous avez modifié {signed_name} après la "
+                "signature, resignez-le puis republiez les "
+                "assets.\n"
                 f"Détail GPG : {details}"
             )
 
@@ -1525,8 +1575,8 @@ class SysTeen:
 
         if "GOODSIG" not in names:
             raise SysTeenError(
-                "SIGNATURE PGP INVALIDE : la mise à jour "
-                "est refusée.\n"
+                f"SIGNATURE PGP INVALIDE ({signed_name}) : "
+                "la mise à jour est refusée.\n"
                 f"Détail GPG : {details}"
             )
 
@@ -1606,6 +1656,19 @@ class SysTeen:
                 "la vérification d'empreinte PGP."
             )
 
+    def validate_downloaded_readme(self, readme_file):
+        try:
+            text = readme_file.read_text(encoding="utf-8")
+
+        except UnicodeDecodeError:
+            raise SysTeenError(
+                "Le nouveau README.md n'est pas "
+                "un fichier UTF-8 valide."
+            )
+
+        if not text.strip():
+            raise SysTeenError("Le nouveau README.md est vide.")
+
     def stage_update(self, downloaded_script):
         destination = (
             self.program_path.parent
@@ -1634,6 +1697,34 @@ class SysTeen:
 
             raise SysTeenError(
                 f"Impossible de préparer la mise à jour : {error}"
+            )
+
+    def stage_readme(self, downloaded_readme):
+        destination = (
+            self.readme_path.parent
+            / ("." + self.readme_path.name + ".update.new")
+        )
+
+        try:
+            if destination.exists():
+                destination.unlink()
+
+            shutil.copy2(downloaded_readme, destination)
+
+            os.chmod(destination, 0o644)
+
+            return destination
+
+        except Exception as error:
+            try:
+                if destination.exists():
+                    destination.unlink()
+            except Exception:
+                pass
+
+            raise SysTeenError(
+                "Impossible de préparer le README.md : "
+                f"{error}"
             )
 
     def restart_after_update(self):
@@ -1665,6 +1756,14 @@ class SysTeen:
             release, UPDATE_SIGNATURE_ASSET
         )
 
+        readme_asset = self.get_release_asset(
+            release, UPDATE_README_ASSET
+        )
+
+        readme_signature_asset = self.get_release_asset(
+            release, UPDATE_README_SIGNATURE_ASSET
+        )
+
         with tempfile.TemporaryDirectory(
             prefix="systeen-update-"
         ) as temporary_directory:
@@ -1673,6 +1772,10 @@ class SysTeen:
 
             downloaded_script = temp_dir / UPDATE_SCRIPT_ASSET
             downloaded_signature = temp_dir / UPDATE_SIGNATURE_ASSET
+            downloaded_readme = temp_dir / UPDATE_README_ASSET
+            downloaded_readme_signature = (
+                temp_dir / UPDATE_README_SIGNATURE_ASSET
+            )
             public_key_file = temp_dir / "systeen-update-key.asc"
             gpg_home = temp_dir / "gnupg"
 
@@ -1702,24 +1805,79 @@ class SysTeen:
                 downloaded_signature
             )
 
+            print("[SysTeen] Téléchargement du README.md...")
+
+            self.download_file(
+                readme_asset["browser_download_url"],
+                downloaded_readme
+            )
+
+            self.download_file(
+                readme_signature_asset["browser_download_url"],
+                downloaded_readme_signature
+            )
+
             print("[SysTeen] Vérification de la signature PGP...")
 
             self.verify_gpg_signature(
                 public_key_file,
                 downloaded_signature,
                 downloaded_script,
-                gpg_home
+                gpg_home,
+                UPDATE_SCRIPT_ASSET
             )
 
-            print("[SysTeen] Signature PGP valide.")
-            print("[SysTeen] Vérification du fichier Python...")
+            print("[SysTeen] Signature PGP de systeen.py valide.")
+
+            self.verify_gpg_signature(
+                public_key_file,
+                downloaded_readme_signature,
+                downloaded_readme,
+                gpg_home,
+                UPDATE_README_ASSET
+            )
+
+            print("[SysTeen] Signature PGP du README.md valide.")
+            print("[SysTeen] Vérification des fichiers...")
 
             self.validate_downloaded_python(
                 downloaded_script,
                 target_version
             )
 
-            staged_file = self.stage_update(downloaded_script)
+            self.validate_downloaded_readme(downloaded_readme)
+
+            # Tout est vérifié : on prépare les deux fichiers
+            staged_readme = self.stage_readme(downloaded_readme)
+
+            try:
+                staged_file = self.stage_update(downloaded_script)
+
+            except SysTeenError:
+                try:
+                    if staged_readme.exists():
+                        staged_readme.unlink()
+                except Exception:
+                    pass
+
+                raise
+
+        # Installation : README d'abord, programme ensuite
+        try:
+            os.replace(staged_readme, self.readme_path)
+
+        except Exception as error:
+
+            for leftover in (staged_readme, staged_file):
+                try:
+                    if leftover.exists():
+                        leftover.unlink()
+                except Exception:
+                    pass
+
+            raise SysTeenError(
+                f"Impossible d'installer le README.md : {error}"
+            )
 
         try:
             os.replace(staged_file, self.program_path)
@@ -1814,6 +1972,20 @@ class SysTeen:
         latest_tuple = self.parse_version(latest_version)
 
         if latest_tuple == current_tuple:
+
+            # À jour, mais README.md absent (ex. mise à jour
+            # faite avec une ancienne version de SysTeen) :
+            # on réinstalle la version courante, vérifiée.
+            if not self.readme_path.is_file():
+                print(
+                    f"[SysTeen] SysTeen {VERSION} est à jour, "
+                    "mais README.md est absent."
+                )
+
+                self.install_update(release, latest_version)
+
+                return
+
             print(f"[SysTeen] SysTeen {VERSION} est déjà à jour.")
             return
 
@@ -2277,6 +2449,7 @@ def print_usage():
     print("  python systeen.py --maj           Mettre à jour vers la dernière version")
     print("  python systeen.py --maj 0.4.2     Installer une version précise (rollback)")
     print("  python systeen.py --update        Alias de --maj")
+    print("  python systeen.py --readme        Afficher le README.md")
     print("  python systeen.py --version       Afficher la version installée")
     print("  python systeen.py --help          Afficher cette aide")
 
@@ -2310,6 +2483,33 @@ def run_update_mode(arguments):
         sys.exit(1)
 
 
+def run_readme_mode(arguments):
+    """
+    python systeen.py --readme
+    """
+
+    if arguments:
+        print_usage()
+        sys.exit(1)
+
+    systeen = SysTeen(None)
+
+    try:
+        systeen.command_readme()
+
+    except SysTeenError as error:
+        print(f"[SysTeen] Erreur : {error}")
+        sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n[SysTeen] Arrêt.")
+        sys.exit(130)
+
+    except Exception as error:
+        print(f"[SysTeen] Erreur inattendue : {error}")
+        sys.exit(1)
+
+
 def main():
 
     arguments = sys.argv[1:]
@@ -2324,6 +2524,10 @@ def main():
 
     if arguments and arguments[0] in ("--maj", "--update"):
         run_update_mode(arguments[1:])
+        sys.exit(0)
+
+    if arguments and arguments[0] == "--readme":
+        run_readme_mode(arguments[1:])
         sys.exit(0)
 
     if len(arguments) != 1:
