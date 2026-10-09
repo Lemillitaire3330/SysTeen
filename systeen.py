@@ -2276,9 +2276,9 @@ def print_usage():
     print("  python systeen.py fichier.st      Exécuter un script SysTeen")
     print("  python systeen.py --maj           Mettre à jour vers la dernière version")
     print("  python systeen.py --maj 0.4.2     Installer une version précise (rollback)")
+    print("  python systeen.py --update        Alias de --maj")
     print("  python systeen.py --version       Afficher la version installée")
     print("  python systeen.py --help          Afficher cette aide")
-
 
 def run_update_mode(arguments):
     """
