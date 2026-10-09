@@ -2,7 +2,6 @@
 
 import ast
 import getpass
-import hashlib
 import json
 import operator
 import os
@@ -21,7 +20,7 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.5.0"
+VERSION = "0.5.2"
 
 # =============================================================
 # MISE A JOUR SECURISEE
@@ -61,6 +60,7 @@ RmallIIkPIO1DMgLjTZVengwwbYtSTDIREXdlxolqSVH4BMjetv2sTZ4JrgrMQbo
 XSHex0FXF4QhV+fLcRlwexfxWdRG9n8ysogTzCfUqtPfSddbDaI=
 =0o1w
 -----END PGP PUBLIC KEY BLOCK-----
+
 """
 
 PGP_FINGERPRINT = "F7FEE16BFE36DEAE35079EFF0FDD49DB07AC253E"
@@ -97,38 +97,25 @@ class SafeMath:
             if isinstance(node.value, (int, float)):
                 return node.value
 
-            raise SysTeenError(
-                "Valeur mathématique invalide."
-            )
+            raise SysTeenError("Valeur mathématique invalide.")
 
         if isinstance(node, ast.BinOp):
             op = cls.OPERATORS.get(type(node.op))
 
             if op is None:
-                raise SysTeenError(
-                    "Opérateur mathématique non autorisé."
-                )
+                raise SysTeenError("Opérateur mathématique non autorisé.")
 
-            return op(
-                cls._eval(node.left),
-                cls._eval(node.right)
-            )
+            return op(cls._eval(node.left), cls._eval(node.right))
 
         if isinstance(node, ast.UnaryOp):
             op = cls.OPERATORS.get(type(node.op))
 
             if op is None:
-                raise SysTeenError(
-                    "Opérateur mathématique non autorisé."
-                )
+                raise SysTeenError("Opérateur mathématique non autorisé.")
 
-            return op(
-                cls._eval(node.operand)
-            )
+            return op(cls._eval(node.operand))
 
-        raise SysTeenError(
-            "Expression mathématique invalide."
-        )
+        raise SysTeenError("Expression mathématique invalide.")
 
 
 class SysTeen:
@@ -136,35 +123,51 @@ class SysTeen:
     # INITIALISATION
     # =========================================================
 
-    def __init__(self, script_path):
-        self.script_path = Path(
-            script_path
-        ).resolve()
+    def __init__(self, script_path=None):
+        # Chemin du programme SysTeen lui-même (cible des mises à jour)
+        self.program_path = Path(__file__).resolve()
+
+        # Redémarrer SysTeen après une mise à jour réussie
+        # (désactivé en mode "python systeen.py --maj")
+        self.restart_after_install = True
+
+        self.update_fingerprint = None
+
+        if script_path is None:
+            # Mode sans script : python systeen.py --maj
+            self.script_path = None
+            self.lines = []
+            self.variables = {}
+            self.saved_variables = set()
+            self.running = True
+            self.finished = False
+            self.loop_states = {}
+            self.save_file = None
+            self.config_dir = Path.home() / ".config" / "systeen"
+            self.config_file = self.config_dir / "config.json"
+            self.safety_enabled = True
+            return
+
+        self.script_path = Path(script_path).resolve()
 
         if self.script_path.suffix != ".st":
             raise SysTeenError(
-                "Le fichier SysTeen doit avoir "
-                "l'extension .st."
+                "Le fichier SysTeen doit avoir l'extension .st."
             )
 
         if not self.script_path.is_file():
-            raise SysTeenError(
-                "Fichier SysTeen introuvable."
-            )
+            raise SysTeenError("Fichier SysTeen introuvable.")
 
         self.lines = self.script_path.read_text(
             encoding="utf-8"
         ).splitlines()
 
         if not self.lines:
-            raise SysTeenError(
-                "Le fichier SysTeen est vide."
-            )
+            raise SysTeenError("Le fichier SysTeen est vide.")
 
         if self.lines[0].strip() != ":systeen start":
             raise SysTeenError(
-                "La première ligne doit être "
-                ":systeen start"
+                "La première ligne doit être :systeen start"
             )
 
         self.variables = {}
@@ -175,31 +178,16 @@ class SysTeen:
 
         self.loop_states = {}
 
-        self.save_file = Path(
-            str(self.script_path) + ".vars"
-        )
+        self.save_file = Path(str(self.script_path) + ".vars")
 
-        # -----------------------------------------------------
-        # CONFIGURATION PERSISTANTE
-        # -----------------------------------------------------
-
-        self.config_dir = (
-            Path.home()
-            / ".config"
-            / "systeen"
-        )
-
-        self.config_file = (
-            self.config_dir
-            / "config.json"
-        )
+        # Configuration persistante
+        self.config_dir = Path.home() / ".config" / "systeen"
+        self.config_file = self.config_dir / "config.json"
 
         self.safety_enabled = True
+        self.update_fingerprint = None
 
-        # -----------------------------------------------------
-        # VARIABLES SAUVEGARDEES
-        # -----------------------------------------------------
-
+        # Variables sauvegardées
         self.load_saved_variables()
 
     # =========================================================
@@ -207,16 +195,10 @@ class SysTeen:
     # =========================================================
 
     def ensure_config_directory(self):
-        self.config_dir.mkdir(
-            parents=True,
-            exist_ok=True
-        )
+        self.config_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            os.chmod(
-                self.config_dir,
-                0o700
-            )
+            os.chmod(self.config_dir, 0o700)
         except OSError:
             pass
 
@@ -234,18 +216,14 @@ class SysTeen:
 
         try:
             data = json.loads(
-                self.config_file.read_text(
-                    encoding="utf-8"
-                )
+                self.config_file.read_text(encoding="utf-8")
             )
 
             if not isinstance(data, dict):
                 self.safety_enabled = True
                 return False
 
-            value = data.get(
-                "protect_system_paths"
-            )
+            value = data.get("protect_system_paths")
 
             if isinstance(value, bool):
                 self.safety_enabled = value
@@ -265,40 +243,27 @@ class SysTeen:
 
         data = {
             "version": 1,
-            "protect_system_paths": (
-                self.safety_enabled
-            )
+            "protect_system_paths": self.safety_enabled
         }
 
         self.config_file.write_text(
-            json.dumps(
-                data,
-                ensure_ascii=False,
-                indent=2
-            ),
+            json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
 
         try:
-            os.chmod(
-                self.config_file,
-                0o600
-            )
+            os.chmod(self.config_file, 0o600)
         except OSError:
             pass
 
     def ask_security_preference(self):
         print()
-        print(
-            "[SysTeen] Configuration de sécurité"
-        )
+        print("[SysTeen] Configuration de sécurité")
         print(
             "[SysTeen] La sécurité empêche :del, :del! "
             "et :rmf de supprimer / et votre dossier personnel."
         )
-        print(
-            "[SysTeen] Réponse par défaut : OUI."
-        )
+        print("[SysTeen] Réponse par défaut : OUI.")
 
         while True:
             answer = input(
@@ -313,77 +278,38 @@ class SysTeen:
                 self.safety_enabled = False
                 break
 
-            print(
-                "[SysTeen] Réponse invalide. "
-                "Répondez Y ou n."
-            )
+            print("[SysTeen] Réponse invalide. Répondez Y ou n.")
 
         self.save_security_config()
 
-        state = (
-            "OUI"
-            if self.safety_enabled
-            else "NON"
-        )
+        state = "OUI" if self.safety_enabled else "NON"
 
-        print(
-            f"[SysTeen] Sécurité enregistrée : {state}"
-        )
+        print(f"[SysTeen] Sécurité enregistrée : {state}")
 
     def confirm_script_launch(self):
         """
         Affiche systématiquement un rappel avant l'exécution.
         """
 
-        state = (
-            "OUI"
-            if self.safety_enabled
-            else "NON"
-        )
+        state = "OUI" if self.safety_enabled else "NON"
 
         filename = self.script_path.name
 
         print()
-        print(
-            f"[SysTeen] : RAPPEL : Vous avez la sécurité : "
-            f"{state}."
-        )
-
-        print(
-            f"[SysTeen] Vérifiez le code de "
-            f"{filename} avant de le lancer."
-        )
-
-        print(
-            f"[SysTeen] Souhaitez-vous lancer "
-            f"{filename} ? (Y/n)"
-        )
+        print(f"[SysTeen] : RAPPEL : Vous avez la sécurité : {state}.")
+        print(f"[SysTeen] Vérifiez le code de {filename} avant de le lancer.")
+        print(f"[SysTeen] Souhaitez-vous lancer {filename} ? (Y/n)")
 
         while True:
-            answer = input(
-                "[SysTeen] > "
-            ).strip().lower()
+            answer = input("[SysTeen] > ").strip().lower()
 
-            if answer in (
-                "",
-                "y",
-                "yes",
-                "o",
-                "oui"
-            ):
+            if answer in ("", "y", "yes", "o", "oui"):
                 return True
 
-            if answer in (
-                "n",
-                "no",
-                "non"
-            ):
+            if answer in ("n", "no", "non"):
                 return False
 
-            print(
-                "[SysTeen] Réponse invalide. "
-                "Répondez Y ou n."
-            )
+            print("[SysTeen] Réponse invalide. Répondez Y ou n.")
 
     def is_protected_path(self, path):
         """
@@ -398,10 +324,7 @@ class SysTeen:
         root = Path("/").resolve()
         home = Path.home().resolve()
 
-        return (
-            resolved == root
-            or resolved == home
-        )
+        return resolved == root or resolved == home
 
     def check_destructive_path(self, path):
         """
@@ -427,9 +350,7 @@ class SysTeen:
 
         try:
             data = json.loads(
-                self.save_file.read_text(
-                    encoding="utf-8"
-                )
+                self.save_file.read_text(encoding="utf-8")
             )
 
             if not isinstance(data, dict):
@@ -455,18 +376,13 @@ class SysTeen:
 
         if data:
             self.save_file.write_text(
-                json.dumps(
-                    data,
-                    ensure_ascii=False,
-                    indent=2
-                ),
+                json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8"
             )
 
         else:
             try:
                 self.save_file.unlink()
-
             except FileNotFoundError:
                 pass
 
@@ -478,22 +394,17 @@ class SysTeen:
     def require_variable(self, name):
         if name not in self.variables:
             raise SysTeenError(
-                f"Variable-404 : la variable "
-                f"'{name}' n'existe pas."
+                f"Variable-404 : la variable '{name}' n'existe pas."
             )
 
         return self.variables[name]
 
     def create_variable(self, name):
         if not name:
-            raise SysTeenError(
-                "Nom de variable manquant."
-            )
+            raise SysTeenError("Nom de variable manquant.")
 
         if name in self.variables:
-            raise SysTeenError(
-                f"La variable '{name}' existe déjà."
-            )
+            raise SysTeenError(f"La variable '{name}' existe déjà.")
 
         self.variables[name] = "X"
 
@@ -525,27 +436,19 @@ class SysTeen:
         if not isinstance(text, str):
             return text
 
-        pattern = re.compile(
-            r"\$([A-Za-z_][A-Za-z0-9_.]*)"
-        )
+        pattern = re.compile(r"\$([A-Za-z_][A-Za-z0-9_.]*)")
 
         def replace_variable(match):
             name = match.group(1)
 
             if name not in self.variables:
                 raise SysTeenError(
-                    f"Variable-404 : la variable "
-                    f"'{name}' n'existe pas."
+                    f"Variable-404 : la variable '{name}' n'existe pas."
                 )
 
-            return str(
-                self.variables[name]
-            )
+            return str(self.variables[name])
 
-        return pattern.sub(
-            replace_variable,
-            text
-        )
+        return pattern.sub(replace_variable, text)
 
     # =========================================================
     # VARIABLES SYSTEME
@@ -553,14 +456,7 @@ class SysTeen:
 
     @staticmethod
     def format_bytes(value):
-        units = [
-            "B",
-            "KB",
-            "MB",
-            "GB",
-            "TB",
-            "PB",
-        ]
+        units = ["B", "KB", "MB", "GB", "TB", "PB"]
 
         value = float(value)
 
@@ -573,9 +469,7 @@ class SysTeen:
         return f"{value:.1f} EB"
 
     def get_os_name(self):
-        os_release = Path(
-            "/etc/os-release"
-        )
+        os_release = Path("/etc/os-release")
 
         if not os_release.exists():
             return "Linux"
@@ -590,30 +484,17 @@ class SysTeen:
                 if "=" not in line:
                     continue
 
-                key, value = line.split(
-                    "=",
-                    1
-                )
+                key, value = line.split("=", 1)
 
-                data[key] = value.strip(
-                    '"'
-                )
+                data[key] = value.strip('"')
 
-            return data.get(
-                "PRETTY_NAME",
-                data.get(
-                    "NAME",
-                    "Linux"
-                )
-            )
+            return data.get("PRETTY_NAME", data.get("NAME", "Linux"))
 
         except Exception:
             return "Linux"
 
     def get_ram(self):
-        meminfo = Path(
-            "/proc/meminfo"
-        )
+        meminfo = Path("/proc/meminfo")
 
         if not meminfo.exists():
             return "Inconnue"
@@ -626,10 +507,7 @@ class SysTeen:
                 if ":" not in line:
                     continue
 
-                key, value = line.split(
-                    ":",
-                    1
-                )
+                key, value = line.split(":", 1)
 
                 value = value.strip()
 
@@ -638,53 +516,31 @@ class SysTeen:
 
                 values[key] = int(value) * 1024
 
-            total = values.get(
-                "MemTotal",
-                0
-            )
-
-            return self.format_bytes(total)
+            return self.format_bytes(values.get("MemTotal", 0))
 
         except Exception:
             return "Inconnue"
 
     def get_storage(self):
         try:
-            usage = shutil.disk_usage(
-                self.script_path.parent
-            )
+            usage = shutil.disk_usage(self.script_path.parent)
 
-            return self.format_bytes(
-                usage.free
-            )
+            return self.format_bytes(usage.free)
 
         except Exception:
             return "Inconnue"
 
     def get_battery(self):
-        batteries = list(
-            Path(
-                "/sys/class/power_supply"
-            ).glob("BAT*")
-        )
+        batteries = list(Path("/sys/class/power_supply").glob("BAT*"))
 
         if not batteries:
             return "N/A"
 
-        battery = batteries[0]
-
-        capacity_file = battery / "capacity"
+        capacity_file = batteries[0] / "capacity"
 
         if capacity_file.exists():
             try:
-                capacity = (
-                    capacity_file
-                    .read_text()
-                    .strip()
-                )
-
-                return f"{capacity}%"
-
+                return f"{capacity_file.read_text().strip()}%"
             except Exception:
                 pass
 
@@ -692,48 +548,24 @@ class SysTeen:
 
     def get_permissions(self):
         try:
-            mode = self.script_path.stat().st_mode
-
-            return stat.filemode(mode)
-
+            return stat.filemode(self.script_path.stat().st_mode)
         except Exception:
             return "Inconnues"
 
     def get_uptime(self):
-        uptime_file = Path(
-            "/proc/uptime"
-        )
+        uptime_file = Path("/proc/uptime")
 
         if not uptime_file.exists():
             return "Inconnue"
 
         try:
-            seconds = int(
-                float(
-                    uptime_file.read_text().split()[0]
-                )
-            )
+            seconds = int(float(uptime_file.read_text().split()[0]))
 
-            days, seconds = divmod(
-                seconds,
-                86400
-            )
+            days, seconds = divmod(seconds, 86400)
+            hours, seconds = divmod(seconds, 3600)
+            minutes, seconds = divmod(seconds, 60)
 
-            hours, seconds = divmod(
-                seconds,
-                3600
-            )
-
-            minutes, seconds = divmod(
-                seconds,
-                60
-            )
-
-            return (
-                f"{days}j "
-                f"{hours}h "
-                f"{minutes}min"
-            )
+            return f"{days}j {hours}h {minutes}min"
 
         except Exception:
             return "Inconnue"
@@ -749,30 +581,13 @@ class SysTeen:
             "sys.hostname": platform.node(),
             "sys.kernel": platform.release(),
             "sys.arch": platform.machine(),
-            "sys.cpu": (
-                platform.processor()
-                or "Inconnu"
-            ),
-            "sys.cores": (
-                os.cpu_count()
-                or 1
-            ),
-            "sys.cwd": str(
-                Path.cwd()
-            ),
-            "sys.script": str(
-                self.script_path
-            ),
-            "sys.home": str(
-                Path.home()
-            ),
-            "sys.python": (
-                platform.python_version()
-            ),
-            "sys.shell": os.environ.get(
-                "SHELL",
-                "Inconnu"
-            ),
+            "sys.cpu": platform.processor() or "Inconnu",
+            "sys.cores": os.cpu_count() or 1,
+            "sys.cwd": str(Path.cwd()),
+            "sys.script": str(self.script_path),
+            "sys.home": str(Path.home()),
+            "sys.python": platform.python_version(),
+            "sys.shell": os.environ.get("SHELL", "Inconnu"),
             "sys.uptime": self.get_uptime(),
         }
 
@@ -800,9 +615,7 @@ class SysTeen:
             return text
 
     def condition_path(self, path_text):
-        path = Path(
-            os.path.expanduser(path_text)
-        )
+        path = Path(os.path.expanduser(path_text))
 
         if not path.is_absolute():
             path = self.script_path.parent / path
@@ -817,78 +630,46 @@ class SysTeen:
 
             if not target:
                 raise SysTeenError(
-                    "Syntaxe : "
-                    ":if exist [variable/fichier]"
+                    "Syntaxe : :if exist [variable/fichier]"
                 )
 
             if target.startswith("$"):
-                variable_name = target[1:]
+                return target[1:] in self.variables
 
-                return (
-                    variable_name
-                    in self.variables
-                )
+            target = self.interpolate(target)
 
-            target = self.interpolate(
-                target
-            )
-
-            return self.condition_path(
-                target
-            ).exists()
+            return self.condition_path(target).exists()
 
         if condition.startswith("not exist "):
             target = condition[10:].strip()
 
             if not target:
                 raise SysTeenError(
-                    "Syntaxe : "
-                    ":if not exist [variable/fichier]"
+                    "Syntaxe : :if not exist [variable/fichier]"
                 )
 
             if target.startswith("$"):
-                variable_name = target[1:]
+                return target[1:] not in self.variables
 
-                return (
-                    variable_name
-                    not in self.variables
-                )
+            target = self.interpolate(target)
 
-            target = self.interpolate(
-                target
-            )
-
-            return not self.condition_path(
-                target
-            ).exists()
+            return not self.condition_path(target).exists()
 
         if condition.startswith("empty "):
             target = condition[6:].strip()
 
             if not target.startswith("$"):
-                raise SysTeenError(
-                    "empty doit utiliser une variable."
-                )
+                raise SysTeenError("empty doit utiliser une variable.")
 
-            value = self.require_variable(
-                target[1:]
-            )
-
-            return str(value) == ""
+            return str(self.require_variable(target[1:])) == ""
 
         if condition.startswith("notempty "):
             target = condition[9:].strip()
 
             if not target.startswith("$"):
-                raise SysTeenError(
-                    "notempty doit utiliser une variable."
-                )
+                raise SysTeenError("notempty doit utiliser une variable.")
 
-            value = self.require_variable(
-                target[1:]
-            )
-
-            return str(value) != ""
+            return str(self.require_variable(target[1:])) != ""
 
         text_operators = [
             "not contains",
@@ -899,35 +680,23 @@ class SysTeen:
 
         for operator_name in text_operators:
 
-            separator = (
-                f" {operator_name} "
-            )
+            separator = f" {operator_name} "
 
             if separator not in condition:
                 continue
 
-            left, right = condition.split(
-                separator,
-                1
-            )
+            left, right = condition.split(separator, 1)
 
             left = left.strip()
 
-            right = self.interpolate(
-                right.strip()
-            )
+            right = self.interpolate(right.strip())
 
             if not left.startswith("$"):
                 raise SysTeenError(
-                    "Une condition doit utiliser "
-                    "une variable."
+                    "Une condition doit utiliser une variable."
                 )
 
-            value = str(
-                self.require_variable(
-                    left[1:]
-                )
-            )
+            value = str(self.require_variable(left[1:]))
 
             if operator_name == "contains":
                 return right in value
@@ -941,14 +710,7 @@ class SysTeen:
             if operator_name == "endswith":
                 return value.endswith(right)
 
-        operators = [
-            "==",
-            "!=",
-            ">=",
-            "<=",
-            ">",
-            "<",
-        ]
+        operators = ["==", "!=", ">=", "<=", ">", "<"]
 
         selected_operator = None
 
@@ -958,51 +720,32 @@ class SysTeen:
                 break
 
         if selected_operator is None:
-            raise SysTeenError(
-                "Condition invalide."
-            )
+            raise SysTeenError("Condition invalide.")
 
-        left, right = condition.split(
-            selected_operator,
-            1
-        )
+        left, right = condition.split(selected_operator, 1)
 
         left = left.strip()
         right = right.strip()
 
         if not left or not right:
-            raise SysTeenError(
-                "Condition incomplète."
-            )
+            raise SysTeenError("Condition incomplète.")
 
         if not left.startswith("$"):
             raise SysTeenError(
-                "Une condition doit utiliser "
-                "une variable."
+                "Une condition doit utiliser une variable."
             )
 
         variable_name = left[1:]
 
         if not variable_name:
-            raise SysTeenError(
-                "Nom de variable manquant."
-            )
+            raise SysTeenError("Nom de variable manquant.")
 
-        left_value = self.require_variable(
-            variable_name
-        )
+        left_value = self.require_variable(variable_name)
 
-        right_value = self.interpolate(
-            right
-        )
+        right_value = self.interpolate(right)
 
-        left_value = self.convert_value(
-            left_value
-        )
-
-        right_value = self.convert_value(
-            right_value
-        )
+        left_value = self.convert_value(left_value)
+        right_value = self.convert_value(right_value)
 
         try:
             if selected_operator == "==":
@@ -1024,9 +767,7 @@ class SysTeen:
                 return left_value <= right_value
 
         except TypeError:
-            raise SysTeenError(
-                "Impossible de comparer ces valeurs."
-            )
+            raise SysTeenError("Impossible de comparer ces valeurs.")
 
         return False
 
@@ -1038,10 +779,7 @@ class SysTeen:
         depth = 0
         else_line = None
 
-        for index in range(
-            start,
-            len(self.lines)
-        ):
+        for index in range(start, len(self.lines)):
             line = self.lines[index].strip()
 
             if not line.startswith(":"):
@@ -1052,9 +790,7 @@ class SysTeen:
             if not command_line:
                 continue
 
-            command = command_line.split(
-                maxsplit=1
-            )[0]
+            command = command_line.split(maxsplit=1)[0]
 
             if command == "if":
                 depth += 1
@@ -1063,10 +799,7 @@ class SysTeen:
             if command == "elsend":
 
                 if depth == 0:
-                    return (
-                        else_line,
-                        index
-                    )
+                    return else_line, index
 
                 depth -= 1
                 continue
@@ -1076,15 +809,12 @@ class SysTeen:
 
                     if else_line is not None:
                         raise SysTeenError(
-                            "Plusieurs :else dans "
-                            "le même :if."
+                            "Plusieurs :else dans le même :if."
                         )
 
                     else_line = index
 
-        raise SysTeenError(
-            ":if sans :elsend."
-        )
+        raise SysTeenError(":if sans :elsend.")
 
     # =========================================================
     # CHEMINS
@@ -1092,9 +822,7 @@ class SysTeen:
 
     @staticmethod
     def safe_path(path_text):
-        path = Path(
-            os.path.expanduser(path_text)
-        )
+        path = Path(os.path.expanduser(path_text))
 
         if not path.is_absolute():
             path = Path.cwd() / path
@@ -1108,9 +836,7 @@ class SysTeen:
     def delete_path(self, path_text):
         path = self.safe_path(path_text)
 
-        self.check_destructive_path(
-            path
-        )
+        self.check_destructive_path(path)
 
         if not path.exists() and not path.is_symlink():
             raise SysTeenError(
@@ -1126,18 +852,10 @@ class SysTeen:
     def delete_with_sudo(self, path_text):
         path = self.safe_path(path_text)
 
-        self.check_destructive_path(
-            path
-        )
+        self.check_destructive_path(path)
 
         result = subprocess.run(
-            [
-                "sudo",
-                "rm",
-                "-rf",
-                "--",
-                str(path)
-            ]
+            ["sudo", "rm", "-rf", "--", str(path)]
         )
 
         if result.returncode != 0:
@@ -1145,72 +863,47 @@ class SysTeen:
                 f"Échec de la suppression avec sudo : {path}"
             )
 
-    def command_del(
-        self,
-        content,
-        fallback_sudo=False
-    ):
-        content = self.interpolate(
-            content.strip()
-        )
+    def command_del(self, content, fallback_sudo=False):
+        content = self.interpolate(content.strip())
 
         if not content:
-            raise SysTeenError(
-                "Fichier ou dossier manquant."
-            )
+            raise SysTeenError("Fichier ou dossier manquant.")
 
         try:
-            self.delete_path(
-                content
-            )
+            self.delete_path(content)
 
         except PermissionError:
 
             if fallback_sudo:
-
                 print(
                     "[SysTeen] Accès refusé. "
                     "Nouvelle tentative avec sudo..."
                 )
 
-                self.delete_with_sudo(
-                    content
-                )
+                self.delete_with_sudo(content)
 
             else:
-
                 raise SysTeenError(
-                    "Accès refusé. Utilisez :del! "
-                    "ou :rmf."
+                    "Accès refusé. Utilisez :del! ou :rmf."
                 )
 
     def command_rmf(self, content):
-        content = self.interpolate(
-            content.strip()
-        )
+        content = self.interpolate(content.strip())
 
         if not content:
-            raise SysTeenError(
-                "Fichier ou dossier manquant."
-            )
+            raise SysTeenError("Fichier ou dossier manquant.")
 
-        self.delete_with_sudo(
-            content
-        )
+        self.delete_with_sudo(content)
 
     # =========================================================
     # CREA
     # =========================================================
 
     def command_crea(self, content):
-        name = self.interpolate(
-            content.strip()
-        )
+        name = self.interpolate(content.strip())
 
         if not name:
-            raise SysTeenError(
-                "Nom manquant."
-            )
+            raise SysTeenError("Nom manquant.")
 
         path = self.safe_path(name)
 
@@ -1220,122 +913,70 @@ class SysTeen:
             )
 
         if Path(name).suffix:
-            path.parent.mkdir(
-                parents=True,
-                exist_ok=True
-            )
+            path.parent.mkdir(parents=True, exist_ok=True)
 
             path.touch()
 
         else:
-            path.mkdir(
-                parents=True
-            )
+            path.mkdir(parents=True)
 
     # =========================================================
     # EDIT
     # =========================================================
 
-    def find_edit_text(
-        self,
-        line_index,
-        first_line
-    ):
+    def find_edit_text(self, line_index, first_line):
         text = first_line
 
         first_quote = text.find('"')
 
         if first_quote == -1:
-            raise SysTeenError(
-                'Syntaxe : :edit [fichier] "texte"'
-            )
+            raise SysTeenError('Syntaxe : :edit [fichier] "texte"')
 
-        content = text[
-            first_quote + 1:
-        ]
+        content = text[first_quote + 1:]
 
         while True:
             closing_quote = content.find('"')
 
             if closing_quote != -1:
-                final_text = content[
-                    :closing_quote
-                ]
-
-                return (
-                    final_text,
-                    line_index
-                )
+                return content[:closing_quote], line_index
 
             line_index += 1
 
             if line_index >= len(self.lines):
                 raise SysTeenError(
-                    "Guillemet fermant manquant "
-                    "dans :edit."
+                    "Guillemet fermant manquant dans :edit."
                 )
 
-            content += (
-                "\n" +
-                self.lines[line_index]
-            )
+            content += "\n" + self.lines[line_index]
 
-    def command_edit(
-        self,
-        line_index,
-        content
-    ):
+    def command_edit(self, line_index, content):
         content = content.strip()
 
         if not content:
-            raise SysTeenError(
-                'Syntaxe : :edit [fichier] "texte"'
-            )
+            raise SysTeenError('Syntaxe : :edit [fichier] "texte"')
 
         first_quote = content.find('"')
 
         if first_quote == -1:
-            raise SysTeenError(
-                'Syntaxe : :edit [fichier] "texte"'
-            )
+            raise SysTeenError('Syntaxe : :edit [fichier] "texte"')
 
-        filename = content[
-            :first_quote
-        ].strip()
+        filename = content[:first_quote].strip()
 
         if not filename:
-            raise SysTeenError(
-                "Nom de fichier manquant."
-            )
+            raise SysTeenError("Nom de fichier manquant.")
 
-        full_content, last_line = (
-            self.find_edit_text(
-                line_index,
-                content
-            )
+        full_content, last_line = self.find_edit_text(
+            line_index, content
         )
 
-        filename = self.interpolate(
-            filename
-        )
+        filename = self.interpolate(filename)
+        full_content = self.interpolate(full_content)
 
-        full_content = self.interpolate(
-            full_content
-        )
+        path = self.safe_path(filename)
 
-        path = self.safe_path(
-            filename
-        )
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        path.parent.mkdir(
-            parents=True,
-            exist_ok=True
-        )
-
-        path.write_text(
-            full_content,
-            encoding="utf-8"
-        )
+        path.write_text(full_content, encoding="utf-8")
 
         return last_line
 
@@ -1344,38 +985,24 @@ class SysTeen:
     # =========================================================
 
     def command_say(self, content):
-        print(
-            self.interpolate(content)
-        )
+        print(self.interpolate(content))
 
     def command_say_input(self, content):
         if ";" not in content:
             raise SysTeenError(
-                "Syntaxe : "
-                ":say? [question] ; [variable]"
+                "Syntaxe : :say? [question] ; [variable]"
             )
 
-        question, variable = content.rsplit(
-            ";",
-            1
-        )
+        question, variable = content.rsplit(";", 1)
 
         question = question.strip()
         variable = variable.strip()
 
-        self.require_variable(
-            variable
-        )
+        self.require_variable(variable)
 
-        answer = input(
-            self.interpolate(
-                question
-            ) + " "
-        )
+        answer = input(self.interpolate(question) + " ")
 
-        self.variables[
-            variable
-        ] = answer
+        self.variables[variable] = answer
 
     # =========================================================
     # MATH
@@ -1385,33 +1012,22 @@ class SysTeen:
         target = None
 
         if ";" in content:
-            expression, target = content.rsplit(
-                ";",
-                1
-            )
+            expression, target = content.rsplit(";", 1)
 
             expression = expression.strip()
             target = target.strip()
 
-            self.require_variable(
-                target
-            )
+            self.require_variable(target)
 
         else:
             expression = content.strip()
 
-        expression = self.interpolate(
-            expression
-        )
+        expression = self.interpolate(expression)
 
-        result = SafeMath.evaluate(
-            expression
-        )
+        result = SafeMath.evaluate(expression)
 
         if target:
-            self.variables[
-                target
-            ] = result
+            self.variables[target] = result
 
         else:
             print(result)
@@ -1421,81 +1037,49 @@ class SysTeen:
     # =========================================================
 
     def command_cmd(self, content):
-        command = self.interpolate(
-            content.strip()
-        )
+        command = self.interpolate(content.strip())
 
         if not command:
-            raise SysTeenError(
-                "Commande Linux manquante."
-            )
+            raise SysTeenError("Commande Linux manquante.")
 
         print(
             "[SysTeen] Attention : SysTeen va executer "
             "une commande dans votre terminal."
         )
 
-        print(
-            f"[SysTeen] commande : {command}"
-        )
+        print(f"[SysTeen] commande : {command}")
 
-        subprocess.run(
-            command,
-            shell=True
-        )
+        subprocess.run(command, shell=True)
 
     # =========================================================
     # RUN / STOP
     # =========================================================
 
     def command_run(self, content):
-        program = self.interpolate(
-            content.strip()
-        )
+        program = self.interpolate(content.strip())
 
         if not program:
-            raise SysTeenError(
-                "Programme manquant."
-            )
+            raise SysTeenError("Programme manquant.")
 
-        subprocess.Popen(
-            shlex.split(program)
-        )
+        subprocess.Popen(shlex.split(program))
 
     def command_stop(self, content):
-        program = self.interpolate(
-            content.strip()
-        )
+        program = self.interpolate(content.strip())
 
         if not program:
-            raise SysTeenError(
-                "Programme manquant."
-            )
+            raise SysTeenError("Programme manquant.")
 
-        subprocess.run(
-            [
-                "pkill",
-                "-x",
-                program
-            ],
-            check=False
-        )
+        subprocess.run(["pkill", "-x", program], check=False)
 
     # =========================================================
     # CD
     # =========================================================
 
     def command_cd(self, content):
-        path = self.safe_path(
-            self.interpolate(
-                content.strip()
-            )
-        )
+        path = self.safe_path(self.interpolate(content.strip()))
 
         if not path.exists():
-            raise SysTeenError(
-                f"Chemin introuvable : {path}"
-            )
+            raise SysTeenError(f"Chemin introuvable : {path}")
 
         if not path.is_dir():
             raise SysTeenError(
@@ -1509,26 +1093,18 @@ class SysTeen:
     # =========================================================
 
     def command_wait(self, content):
-        parts = (
-            content
-            .strip()
-            .lower()
-            .split()
-        )
+        parts = content.strip().lower().split()
 
         if len(parts) != 2:
             raise SysTeenError(
-                "Syntaxe : "
-                ":wait [nombre] [sec/min/h/j/y]"
+                "Syntaxe : :wait [nombre] [sec/min/h/j/y]"
             )
 
         try:
             amount = float(parts[0])
 
         except ValueError:
-            raise SysTeenError(
-                "Nombre invalide."
-            )
+            raise SysTeenError("Nombre invalide.")
 
         unit = parts[1]
 
@@ -1541,35 +1117,19 @@ class SysTeen:
         }
 
         if unit not in multipliers:
-            raise SysTeenError(
-                "Unité inconnue."
-            )
+            raise SysTeenError("Unité inconnue.")
 
-        time.sleep(
-            amount * multipliers[unit]
-        )
+        time.sleep(amount * multipliers[unit])
 
     # =========================================================
     # SYSTEME
     # =========================================================
 
     def command_reboot(self):
-        subprocess.run(
-            [
-                "systemctl",
-                "reboot"
-            ],
-            check=False
-        )
+        subprocess.run(["systemctl", "reboot"], check=False)
 
     def command_shutdown(self):
-        subprocess.run(
-            [
-                "systemctl",
-                "poweroff"
-            ],
-            check=False
-        )
+        subprocess.run(["systemctl", "poweroff"], check=False)
 
     # =========================================================
     # MISE A JOUR / VERSION
@@ -1586,31 +1146,18 @@ class SysTeen:
         if text.startswith("v"):
             text = text[1:]
 
-        match = re.fullmatch(
-            r"(\d+)\.(\d+)\.(\d+)",
-            text
-        )
+        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", text)
 
         if not match:
-            raise SysTeenError(
-                f"Version invalide : {version}"
-            )
+            raise SysTeenError(f"Version invalide : {version}")
 
-        return tuple(
-            int(value)
-            for value in match.groups()
-        )
+        return tuple(int(value) for value in match.groups())
 
     @staticmethod
     def normalize_version(version):
-        parsed = SysTeen.parse_version(
-            version
-        )
+        parsed = SysTeen.parse_version(version)
 
-        return ".".join(
-            str(value)
-            for value in parsed
-        )
+        return ".".join(str(value) for value in parsed)
 
     def check_update_configuration(self):
         if GITHUB_REPOSITORY == "METTRE_GITHUB_ICI":
@@ -1637,19 +1184,10 @@ class SysTeen:
                 "'proprietaire/depot'."
             )
 
-        fingerprint = re.sub(
-            r"\s+",
-            "",
-            PGP_FINGERPRINT
-        ).upper()
+        fingerprint = re.sub(r"\s+", "", PGP_FINGERPRINT).upper()
 
-        if not re.fullmatch(
-            r"[0-9A-F]{40}",
-            fingerprint
-        ):
-            raise SysTeenError(
-                "Empreinte PGP invalide."
-            )
+        if not re.fullmatch(r"[0-9A-F]{40}", fingerprint):
+            raise SysTeenError("Empreinte PGP invalide.")
 
         self.update_fingerprint = fingerprint
 
@@ -1657,33 +1195,25 @@ class SysTeen:
         request = urllib.request.Request(
             url,
             headers={
-                "User-Agent": (
-                    f"SysTeen/{VERSION}"
-                ),
-                "Accept": (
-                    "application/vnd.github+json"
-                )
+                "User-Agent": f"SysTeen/{VERSION}",
+                "Accept": "application/vnd.github+json"
             }
         )
 
         try:
             with urllib.request.urlopen(
-                request,
-                timeout=30
+                request, timeout=30
             ) as response:
-
                 return response.read()
 
         except urllib.error.HTTPError as error:
             raise SysTeenError(
-                f"GitHub a répondu avec HTTP "
-                f"{error.code}."
+                f"GitHub a répondu avec HTTP {error.code}."
             )
 
         except urllib.error.URLError as error:
             raise SysTeenError(
-                f"Impossible de contacter GitHub : "
-                f"{error.reason}"
+                f"Impossible de contacter GitHub : {error.reason}"
             )
 
         except TimeoutError:
@@ -1692,10 +1222,7 @@ class SysTeen:
             )
 
     def get_github_release(self, target_version=None):
-        repository = urllib.parse.quote(
-            GITHUB_REPOSITORY,
-            safe="/"
-        )
+        repository = urllib.parse.quote(GITHUB_REPOSITORY, safe="/")
 
         if target_version is None:
             url = (
@@ -1704,45 +1231,30 @@ class SysTeen:
             )
 
         else:
-            normalized = self.normalize_version(
-                target_version
-            )
+            normalized = self.normalize_version(target_version)
 
-            tag = urllib.parse.quote(
-                f"v{normalized}",
-                safe=""
-            )
+            tag = urllib.parse.quote(f"v{normalized}", safe="")
 
             url = (
                 "https://api.github.com/repos/"
                 f"{repository}/releases/tags/{tag}"
             )
 
-        raw = self.github_request(
-            url
-        )
+        raw = self.github_request(url)
 
         try:
-            data = json.loads(
-                raw.decode("utf-8")
-            )
+            data = json.loads(raw.decode("utf-8"))
 
         except Exception:
-            raise SysTeenError(
-                "Réponse GitHub invalide."
-            )
+            raise SysTeenError("Réponse GitHub invalide.")
 
         if not isinstance(data, dict):
-            raise SysTeenError(
-                "Réponse GitHub invalide."
-            )
+            raise SysTeenError("Réponse GitHub invalide.")
 
         return data
 
     def get_release_asset(self, release, asset_name):
-        assets = release.get(
-            "assets"
-        )
+        assets = release.get("assets")
 
         if not isinstance(assets, list):
             raise SysTeenError(
@@ -1757,14 +1269,7 @@ class SysTeen:
             if asset.get("name") != asset_name:
                 continue
 
-            download_url = asset.get(
-                "browser_download_url"
-            )
-
-            if not isinstance(
-                download_url,
-                str
-            ):
+            if not isinstance(asset.get("browser_download_url"), str):
                 raise SysTeenError(
                     f"L'asset '{asset_name}' "
                     "ne possède pas d'URL valide."
@@ -1772,36 +1277,26 @@ class SysTeen:
 
             return asset
 
-        raise SysTeenError(
-            f"Asset GitHub introuvable : {asset_name}"
-        )
+        raise SysTeenError(f"Asset GitHub introuvable : {asset_name}")
 
     def download_file(self, url, destination):
         request = urllib.request.Request(
             url,
             headers={
-                "User-Agent": (
-                    f"SysTeen/{VERSION}"
-                ),
+                "User-Agent": f"SysTeen/{VERSION}",
                 "Accept": "*/*"
             }
         )
 
         try:
             with urllib.request.urlopen(
-                request,
-                timeout=60
+                request, timeout=60
             ) as response:
 
-                with open(
-                    destination,
-                    "wb"
-                ) as output:
+                with open(destination, "wb") as output:
 
                     while True:
-                        chunk = response.read(
-                            1024 * 1024
-                        )
+                        chunk = response.read(1024 * 1024)
 
                         if not chunk:
                             break
@@ -1810,14 +1305,13 @@ class SysTeen:
 
         except urllib.error.HTTPError as error:
             raise SysTeenError(
-                f"Impossible de télécharger l'asset "
+                "Impossible de télécharger l'asset "
                 f"(HTTP {error.code})."
             )
 
         except urllib.error.URLError as error:
             raise SysTeenError(
-                f"Impossible de télécharger l'asset : "
-                f"{error.reason}"
+                f"Impossible de télécharger l'asset : {error.reason}"
             )
 
         except TimeoutError:
@@ -1825,74 +1319,67 @@ class SysTeen:
                 "Délai dépassé pendant le téléchargement."
             )
 
+    # ---------------------------------------------------------
+    # VERIFICATION GPG
+    # ---------------------------------------------------------
+
     @staticmethod
-    def sha256_file(path):
-        digest = hashlib.sha256()
-
-        with open(
-            path,
-            "rb"
-        ) as file:
-
-            while True:
-                chunk = file.read(
-                    1024 * 1024
-                )
-
-                if not chunk:
-                    break
-
-                digest.update(chunk)
-
-        return digest.hexdigest()
-
-    def verify_github_digest(
-        self,
-        asset,
-        downloaded_file
-    ):
-        digest = asset.get(
-            "digest"
+    def _run_gpg(command, env):
+        """Lance GPG en binaire et décode sans jamais planter."""
+        result = subprocess.run(
+            command,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False
         )
 
-        if not digest:
-            return
-
-        if not isinstance(
-            digest,
-            str
-        ):
-            raise SysTeenError(
-                "Digest GitHub invalide."
-            )
-
-        if not digest.startswith(
-            "sha256:"
-        ):
-            raise SysTeenError(
-                "Digest GitHub inattendu."
-            )
-
-        expected = digest[
-            len("sha256:"):
-        ].strip().lower()
-
-        if not re.fullmatch(
-            r"[0-9a-f]{64}",
-            expected
-        ):
-            raise SysTeenError(
-                "Digest SHA-256 GitHub invalide."
-            )
-
-        actual = self.sha256_file(
-            downloaded_file
+        return (
+            result.returncode,
+            result.stdout.decode("utf-8", errors="replace"),
+            result.stderr.decode("utf-8", errors="replace")
         )
 
-        if actual != expected:
+    @staticmethod
+    def _gpg_status_lines(output):
+        """Extrait les lignes '[GNUPG:] ...' sous forme de listes."""
+        statuses = []
+
+        for line in output.splitlines():
+            if line.startswith("[GNUPG:] "):
+                statuses.append(line[9:].split())
+
+        return statuses
+
+    @staticmethod
+    def _check_signature_file(signature_file):
+        """Détecte les erreurs classiques sur le fichier .asc."""
+        head = Path(signature_file).read_bytes()[:200].lstrip()
+
+        if not head:
+            raise SysTeenError("Le fichier de signature est vide.")
+
+        if head.startswith(b"-----BEGIN PGP SIGNED MESSAGE-----"):
             raise SysTeenError(
-                "Le SHA-256 de l'asset ne correspond "
-                "pas à celui fourni par GitHub."
+                "Le fichier .asc est une signature 'clearsign' "
+                "et non une signature détachée.\n"
+                "Recréez-la avec : "
+                "gpg --armor --detach-sign systeen.py"
+            )
+
+        if head.startswith(b"-----BEGIN PGP MESSAGE-----"):
+            raise SysTeenError(
+                "Le fichier .asc contient un message PGP (--sign) "
+                "et non une signature détachée.\n"
+                "Recréez-la avec : "
+                "gpg --armor --detach-sign systeen.py"
+            )
+
+        if head.startswith(b"<") or head.lower().startswith(b"not found"):
+            raise SysTeenError(
+                "Le fichier de signature téléchargé n'est pas "
+                "une signature (page HTML/erreur reçue)."
             )
 
     def verify_gpg_signature(
@@ -1902,9 +1389,7 @@ class SysTeen:
         script_file,
         gpg_home
     ):
-        gpg = shutil.which(
-            "gpg"
-        )
+        gpg = shutil.which("gpg")
 
         if gpg is None:
             raise SysTeenError(
@@ -1912,115 +1397,164 @@ class SysTeen:
                 "la signature de la mise à jour."
             )
 
+        expected = re.sub(r"\s+", "", self.update_fingerprint).upper()
+
+        # Environnement GPG isolé, sortie stable (anglais/ASCII)
         env = os.environ.copy()
-        env["GNUPGHOME"] = str(
-            gpg_home
-        )
+        env["GNUPGHOME"] = str(gpg_home)
+        env["LC_ALL"] = "C"
+        env["LANGUAGE"] = "C"
+        env.pop("GPG_AGENT_INFO", None)
 
-        import_result = subprocess.run(
-            [
-                gpg,
-                "--batch",
-                "--quiet",
-                "--no-options",
-                "--import",
-                str(public_key_file)
+        base = [
+            gpg,
+            "--batch",
+            "--no-tty",
+            "--no-options",
+            "--homedir", str(gpg_home),
+        ]
+
+        self._check_signature_file(signature_file)
+
+        # 1) Import de la clé publique
+        code, out, err = self._run_gpg(
+            base + [
+                "--status-fd", "1",
+                "--import", str(public_key_file)
             ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False
+            env
         )
 
-        if import_result.returncode != 0:
+        statuses = self._gpg_status_lines(out)
+
+        imported = any(
+            s and s[0] in ("IMPORT_OK", "IMPORT_RES")
+            for s in statuses
+        )
+
+        if code != 0 or not imported:
             raise SysTeenError(
-                "Impossible d'importer la clé publique PGP."
+                "Impossible d'importer la clé publique PGP.\n"
+                f"Détail GPG : {(err or out).strip()}"
             )
 
-        fingerprint_result = subprocess.run(
-            [
-                gpg,
-                "--batch",
-                "--no-options",
-                "--with-colons",
-                "--fingerprint"
-            ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False
+        # 2) Contrôle de l'empreinte (clé primaire uniquement)
+        code, out, err = self._run_gpg(
+            base + ["--with-colons", "--fingerprint"],
+            env
         )
 
-        if fingerprint_result.returncode != 0:
+        if code != 0:
             raise SysTeenError(
-                "Impossible de vérifier l'empreinte "
-                "de la clé publique PGP."
+                "Impossible de lire les empreintes PGP.\n"
+                f"Détail GPG : {(err or out).strip()}"
             )
 
-        fingerprints = []
+        primary_fingerprints = []
+        expect_primary_fpr = False
 
-        for line in fingerprint_result.stdout.splitlines():
-
+        for line in out.splitlines():
             fields = line.split(":")
+            record = fields[0]
 
-            if len(fields) < 10:
+            if record == "pub":
+                expect_primary_fpr = True
                 continue
 
-            if fields[0] != "fpr":
+            if record == "sub":
+                expect_primary_fpr = False
                 continue
 
-            fingerprint = fields[9].strip().upper()
+            if record == "fpr" and expect_primary_fpr:
+                if len(fields) > 9 and fields[9].strip():
+                    primary_fingerprints.append(
+                        fields[9].strip().upper()
+                    )
 
-            if fingerprint:
-                fingerprints.append(
-                    fingerprint
-                )
+                expect_primary_fpr = False
 
-        expected = re.sub(
-            r"\s+",
-            "",
-            self.update_fingerprint
-        ).upper()
-
-        if expected not in fingerprints:
+        if primary_fingerprints != [expected]:
             raise SysTeenError(
-                "La clé PGP importée ne correspond "
-                "pas à l'empreinte configurée."
+                "La clé PGP intégrée ne correspond pas à "
+                "l'empreinte configurée.\n"
+                f"Attendue : {expected}\n"
+                "Trouvée  : "
+                f"{', '.join(primary_fingerprints) or 'aucune'}"
             )
 
-        verify_result = subprocess.run(
-            [
-                gpg,
-                "--batch",
-                "--no-options",
+        # 3) Vérification de la signature détachée
+        code, out, err = self._run_gpg(
+            base + [
+                "--status-fd", "1",
+                "--ignore-time-conflict",
+                "--ignore-valid-from",
                 "--verify",
                 str(signature_file),
-                str(script_file)
+                str(script_file),
             ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False
+            env
         )
 
-        if verify_result.returncode != 0:
+        statuses = self._gpg_status_lines(out)
+        names = {s[0] for s in statuses if s}
+        details = (err or "").strip() or "Aucun détail fourni."
+
+        if "BADSIG" in names:
             raise SysTeenError(
-                "SIGNATURE PGP INVALIDE : "
-                "la mise à jour est refusée."
+                "SIGNATURE PGP INVALIDE : le fichier ne correspond "
+                "pas à celui qui a été signé.\n"
+                "Si vous avez modifié systeen.py après la signature, "
+                "resignez-le puis republiez les deux assets.\n"
+                f"Détail GPG : {details}"
             )
 
-    def validate_downloaded_python(
-        self,
-        script_file,
-        expected_version
-    ):
-        try:
-            source = script_file.read_text(
-                encoding="utf-8"
+        if "ERRSIG" in names or "NO_PUBKEY" in names:
+            raise SysTeenError(
+                "La signature a été faite par une autre clé "
+                "que celle configurée.\n"
+                f"Détail GPG : {details}"
             )
+
+        for refused in ("EXPSIG", "EXPKEYSIG", "REVKEYSIG"):
+            if refused in names:
+                raise SysTeenError(
+                    f"Signature refusée ({refused}) : clé ou "
+                    "signature expirée/révoquée.\n"
+                    f"Détail GPG : {details}"
+                )
+
+        if "GOODSIG" not in names:
+            raise SysTeenError(
+                "SIGNATURE PGP INVALIDE : la mise à jour "
+                "est refusée.\n"
+                f"Détail GPG : {details}"
+            )
+
+        valid = next(
+            (s for s in statuses if s and s[0] == "VALIDSIG"),
+            None
+        )
+
+        if valid is None or len(valid) < 2:
+            raise SysTeenError(
+                "GPG n'a pas confirmé la validité de la signature "
+                "(VALIDSIG absent).\n"
+                f"Détail GPG : {details}"
+            )
+
+        signer = valid[1].upper()
+        primary = valid[10].upper() if len(valid) > 10 else signer
+
+        if expected not in (signer, primary):
+            raise SysTeenError(
+                "La signature est valide mais n'a pas été faite "
+                "par la clé attendue.\n"
+                f"Signataire : {primary}"
+            )
+
+    def validate_downloaded_python(self, script_file, expected_version):
+        try:
+            source = script_file.read_text(encoding="utf-8")
 
         except UnicodeDecodeError:
             raise SysTeenError(
@@ -2029,11 +1563,7 @@ class SysTeen:
             )
 
         try:
-            compile(
-                source,
-                str(script_file),
-                "exec"
-            )
+            compile(source, str(script_file), "exec")
 
         except SyntaxError as error:
             raise SysTeenError(
@@ -2042,9 +1572,7 @@ class SysTeen:
             )
 
         version_match = re.search(
-            r'^\s*VERSION\s*=\s*["\']'
-            r'(\d+\.\d+\.\d+)'
-            r'["\']',
+            r'^\s*VERSION\s*=\s*["\'](\d+\.\d+\.\d+)["\']',
             source,
             re.MULTILINE
         )
@@ -2055,9 +1583,7 @@ class SysTeen:
                 "pas de VERSION valide."
             )
 
-        downloaded_version = (
-            version_match.group(1)
-        )
+        downloaded_version = version_match.group(1)
 
         if (
             self.parse_version(downloaded_version)
@@ -2080,33 +1606,21 @@ class SysTeen:
                 "la vérification d'empreinte PGP."
             )
 
-    def stage_update(
-        self,
-        downloaded_script
-    ):
+    def stage_update(self, downloaded_script):
         destination = (
-            self.script_path.parent
-            / (
-                "."
-                + self.script_path.name
-                + ".update.new"
-            )
+            self.program_path.parent
+            / ("." + self.program_path.name + ".update.new")
         )
 
         try:
             if destination.exists():
                 destination.unlink()
 
-            shutil.copy2(
-                downloaded_script,
-                destination
-            )
+            shutil.copy2(downloaded_script, destination)
 
             os.chmod(
                 destination,
-                stat.S_IMODE(
-                    self.script_path.stat().st_mode
-                )
+                stat.S_IMODE(self.program_path.stat().st_mode)
             )
 
             return destination
@@ -2119,19 +1633,21 @@ class SysTeen:
                 pass
 
             raise SysTeenError(
-                "Impossible de préparer la mise à jour : "
-                f"{error}"
+                f"Impossible de préparer la mise à jour : {error}"
             )
 
     def restart_after_update(self):
+        # En mode --maj, on s'arrête simplement après l'installation
+        if not self.restart_after_install:
+            return
+
+        arguments = [sys.executable, str(self.program_path)]
+
+        if self.script_path is not None:
+            arguments.append(str(self.script_path))
+
         try:
-            os.execv(
-                sys.executable,
-                [
-                    sys.executable,
-                    *sys.argv
-                ]
-            )
+            os.execv(sys.executable, arguments)
 
         except OSError as error:
             raise SysTeenError(
@@ -2140,56 +1656,34 @@ class SysTeen:
                 f"{error}"
             )
 
-    def install_update(
-        self,
-        release,
-        target_version
-    ):
+    def install_update(self, release, target_version):
         script_asset = self.get_release_asset(
-            release,
-            UPDATE_SCRIPT_ASSET
+            release, UPDATE_SCRIPT_ASSET
         )
 
         signature_asset = self.get_release_asset(
-            release,
-            UPDATE_SIGNATURE_ASSET
+            release, UPDATE_SIGNATURE_ASSET
         )
 
         with tempfile.TemporaryDirectory(
             prefix="systeen-update-"
         ) as temporary_directory:
 
-            temp_dir = Path(
-                temporary_directory
-            )
+            temp_dir = Path(temporary_directory)
 
-            downloaded_script = (
-                temp_dir
-                / UPDATE_SCRIPT_ASSET
-            )
+            downloaded_script = temp_dir / UPDATE_SCRIPT_ASSET
+            downloaded_signature = temp_dir / UPDATE_SIGNATURE_ASSET
+            public_key_file = temp_dir / "systeen-update-key.asc"
+            gpg_home = temp_dir / "gnupg"
 
-            downloaded_signature = (
-                temp_dir
-                / UPDATE_SIGNATURE_ASSET
-            )
+            gpg_home.mkdir(mode=0o700)
 
-            public_key_file = (
-                temp_dir
-                / "systeen-update-key.asc"
-            )
-
-            gpg_home = (
-                temp_dir
-                / "gnupg"
-            )
-
-            gpg_home.mkdir(
-                mode=0o700
-            )
-
+            # Tolérant à l'indentation éventuelle de la clé
             public_key_file.write_text(
-                PGP_PUBLIC_KEY.strip()
-                + "\n",
+                "\n".join(
+                    line.strip()
+                    for line in PGP_PUBLIC_KEY.strip().splitlines()
+                ) + "\n",
                 encoding="utf-8"
             )
 
@@ -2199,37 +1693,16 @@ class SysTeen:
             )
 
             self.download_file(
-                script_asset[
-                    "browser_download_url"
-                ],
+                script_asset["browser_download_url"],
                 downloaded_script
             )
 
             self.download_file(
-                signature_asset[
-                    "browser_download_url"
-                ],
+                signature_asset["browser_download_url"],
                 downloaded_signature
             )
 
-            print(
-                "[SysTeen] Vérification SHA-256..."
-            )
-
-            self.verify_github_digest(
-                script_asset,
-                downloaded_script
-            )
-
-            self.verify_github_digest(
-                signature_asset,
-                downloaded_signature
-            )
-
-            print(
-                "[SysTeen] Vérification de la "
-                "signature PGP..."
-            )
+            print("[SysTeen] Vérification de la signature PGP...")
 
             self.verify_gpg_signature(
                 public_key_file,
@@ -2238,24 +1711,18 @@ class SysTeen:
                 gpg_home
             )
 
-            print(
-                "[SysTeen] Vérification du fichier Python..."
-            )
+            print("[SysTeen] Signature PGP valide.")
+            print("[SysTeen] Vérification du fichier Python...")
 
             self.validate_downloaded_python(
                 downloaded_script,
                 target_version
             )
 
-            staged_file = self.stage_update(
-                downloaded_script
-            )
+            staged_file = self.stage_update(downloaded_script)
 
         try:
-            os.replace(
-                staged_file,
-                self.script_path
-            )
+            os.replace(staged_file, self.program_path)
 
         except Exception as error:
 
@@ -2266,17 +1733,13 @@ class SysTeen:
                 pass
 
             raise SysTeenError(
-                "Impossible d'installer la mise à jour : "
-                f"{error}"
+                f"Impossible d'installer la mise à jour : {error}"
             )
 
-        print(
-            "[SysTeen] Mise à jour installée avec succès."
-        )
+        print("[SysTeen] Mise à jour installée avec succès.")
 
-        print(
-            "[SysTeen] Redémarrage de SysTeen..."
-        )
+        if self.restart_after_install:
+            print("[SysTeen] Redémarrage de SysTeen...")
 
         self.restart_after_update()
 
@@ -2295,22 +1758,14 @@ class SysTeen:
         target = content.strip()
 
         if target:
-            target_version = self.normalize_version(
-                target
-            )
+            target_version = self.normalize_version(target)
 
-            target_tuple = self.parse_version(
-                target_version
-            )
-
-            current_tuple = self.parse_version(
-                VERSION
-            )
+            target_tuple = self.parse_version(target_version)
+            current_tuple = self.parse_version(VERSION)
 
             if target_tuple == current_tuple:
                 print(
-                    f"[SysTeen] Vous utilisez déjà "
-                    f"SysTeen {VERSION}."
+                    f"[SysTeen] Vous utilisez déjà SysTeen {VERSION}."
                 )
                 return
 
@@ -2319,26 +1774,16 @@ class SysTeen:
                 f"v{target_version}..."
             )
 
-            release = self.get_github_release(
-                target_version
-            )
+            release = self.get_github_release(target_version)
 
-            release_tag = release.get(
-                "tag_name"
-            )
+            release_tag = release.get("tag_name")
 
-            if not isinstance(
-                release_tag,
-                str
-            ):
+            if not isinstance(release_tag, str):
                 raise SysTeenError(
-                    "La release GitHub ne possède "
-                    "pas de tag valide."
+                    "La release GitHub ne possède pas de tag valide."
                 )
 
-            release_version = self.normalize_version(
-                release_tag
-            )
+            release_version = self.normalize_version(release_tag)
 
             if release_version != target_version:
                 raise SysTeenError(
@@ -2346,150 +1791,93 @@ class SysTeen:
                     "pas au tag GitHub."
                 )
 
-            print(
-                f"[SysTeen] Installation de "
-                f"SysTeen {target_version}..."
-            )
+            print(f"[SysTeen] Installation de SysTeen {target_version}...")
 
-            self.install_update(
-                release,
-                target_version
-            )
+            self.install_update(release, target_version)
 
             return
 
-        print(
-            "[SysTeen] Recherche de la dernière version..."
-        )
+        print("[SysTeen] Recherche de la dernière version...")
 
         release = self.get_github_release()
 
-        release_tag = release.get(
-            "tag_name"
-        )
+        release_tag = release.get("tag_name")
 
-        if not isinstance(
-            release_tag,
-            str
-        ):
+        if not isinstance(release_tag, str):
             raise SysTeenError(
-                "La release GitHub ne possède "
-                "pas de tag valide."
+                "La release GitHub ne possède pas de tag valide."
             )
 
-        latest_version = self.normalize_version(
-            release_tag
-        )
+        latest_version = self.normalize_version(release_tag)
 
-        current_tuple = self.parse_version(
-            VERSION
-        )
-
-        latest_tuple = self.parse_version(
-            latest_version
-        )
+        current_tuple = self.parse_version(VERSION)
+        latest_tuple = self.parse_version(latest_version)
 
         if latest_tuple == current_tuple:
-            print(
-                f"[SysTeen] SysTeen {VERSION} "
-                "est déjà à jour."
-            )
+            print(f"[SysTeen] SysTeen {VERSION} est déjà à jour.")
             return
 
         if latest_tuple < current_tuple:
             print(
-                f"[SysTeen] La dernière release GitHub "
-                f"({latest_version}) est antérieure à "
-                f"v{VERSION}."
+                "[SysTeen] La dernière release GitHub "
+                f"({latest_version}) est antérieure à v{VERSION}."
             )
 
-            print(
-                "[SysTeen] Aucun downgrade automatique."
-            )
+            print("[SysTeen] Aucun downgrade automatique.")
 
             return
 
         print(
-            f"[SysTeen] Nouvelle version disponible : "
-            f"{latest_version}"
+            f"[SysTeen] Nouvelle version disponible : {latest_version}"
         )
 
-        self.install_update(
-            release,
-            latest_version
-        )
+        self.install_update(release, latest_version)
 
     # =========================================================
     # LOOP
     # =========================================================
 
-    def execute_inline_loop(
-        self,
-        count_text,
-        command
-    ):
+    def execute_inline_loop(self, count_text, command):
         if not command.strip():
             raise SysTeenError(
-                ":loop doit être suivi "
-                "d'une commande."
+                ":loop doit être suivi d'une commande."
             )
 
         if count_text == "inf":
             while self.running:
-                self.execute_inline_command(
-                    command
-                )
+                self.execute_inline_command(command)
 
             return
 
         try:
-            count = int(
-                count_text
-            )
+            count = int(count_text)
 
         except ValueError:
-            raise SysTeenError(
-                "Nombre de répétitions invalide."
-            )
+            raise SysTeenError("Nombre de répétitions invalide.")
 
         if count < 0:
-            raise SysTeenError(
-                "Nombre négatif interdit."
-            )
+            raise SysTeenError("Nombre négatif interdit.")
 
         for _ in range(count):
             if not self.running:
                 break
 
-            self.execute_inline_command(
-                command
-            )
+            self.execute_inline_command(command)
 
-    def execute_inline_command(
-        self,
-        command
-    ):
+    def execute_inline_command(self, command):
         command = command.strip()
 
         if command.startswith(":"):
             command = command[1:].strip()
 
         if not command:
-            raise SysTeenError(
-                "Commande inline vide."
-            )
+            raise SysTeenError("Commande inline vide.")
 
-        parts = command.split(
-            maxsplit=1
-        )
+        parts = command.split(maxsplit=1)
 
         name = parts[0]
 
-        args = (
-            parts[1]
-            if len(parts) > 1
-            else ""
-        )
+        args = parts[1] if len(parts) > 1 else ""
 
         if name == "say":
             self.command_say(args)
@@ -2515,126 +1903,76 @@ class SysTeen:
             self.command_stop(args)
             return
 
-        raise SysTeenError(
-            f"Commande inline inconnue : :{name}"
-        )
+        raise SysTeenError(f"Commande inline inconnue : :{name}")
 
-    def execute_jump_loop(
-        self,
-        line_index,
-        target,
-        count_text
-    ):
+    def execute_jump_loop(self, line_index, target, count_text):
         try:
-            target_line = (
-                int(target) - 1
-            )
+            target_line = int(target) - 1
 
         except ValueError:
-            raise SysTeenError(
-                "Ligne cible invalide."
-            )
+            raise SysTeenError("Ligne cible invalide.")
 
-        if (
-            target_line < 0
-            or target_line >= len(self.lines)
-        ):
-            raise SysTeenError(
-                "Ligne cible inexistante."
-            )
+        if target_line < 0 or target_line >= len(self.lines):
+            raise SysTeenError("Ligne cible inexistante.")
 
         if count_text == "inf":
             return target_line
 
         try:
-            count = int(
-                count_text
-            )
+            count = int(count_text)
 
         except ValueError:
-            raise SysTeenError(
-                "Nombre de boucles invalide."
-            )
+            raise SysTeenError("Nombre de boucles invalide.")
 
         if count < 0:
-            raise SysTeenError(
-                "Nombre négatif interdit."
-            )
+            raise SysTeenError("Nombre négatif interdit.")
 
-        state = self.loop_states.get(
-            line_index
-        )
+        state = self.loop_states.get(line_index)
 
         if state is None:
-            self.loop_states[
-                line_index
-            ] = count
+            self.loop_states[line_index] = count
 
-        if self.loop_states[
-            line_index
-        ] <= 0:
+        if self.loop_states[line_index] <= 0:
 
-            del self.loop_states[
-                line_index
-            ]
+            del self.loop_states[line_index]
 
             return line_index + 1
 
-        self.loop_states[
-            line_index
-        ] -= 1
+        self.loop_states[line_index] -= 1
 
         return target_line
 
-    def command_loop(
-        self,
-        line_index,
-        content
-    ):
+    def command_loop(self, line_index, content):
         content = content.strip()
 
         if not content:
             raise SysTeenError(
-                ":loop doit être suivi "
-                "d'une commande."
+                ":loop doit être suivi d'une commande."
             )
 
-        parts = content.split(
-            maxsplit=2
-        )
+        parts = content.split(maxsplit=2)
 
         first = parts[0]
 
         if first.startswith("L"):
 
             if len(parts) != 1:
-                raise SysTeenError(
-                    "Syntaxe : :loop L5-2"
-                )
+                raise SysTeenError("Syntaxe : :loop L5-2")
 
             loop_data = first[1:]
 
             if "-" not in loop_data:
                 raise SysTeenError(
-                    "Syntaxe : :loop L5-2 "
-                    "ou :loop L5-inf"
+                    "Syntaxe : :loop L5-2 ou :loop L5-inf"
                 )
 
-            target, count = loop_data.split(
-                "-",
-                1
-            )
+            target, count = loop_data.split("-", 1)
 
-            return self.execute_jump_loop(
-                line_index,
-                target,
-                count
-            )
+            return self.execute_jump_loop(line_index, target, count)
 
         if len(parts) < 2:
             raise SysTeenError(
-                ":loop doit contenir "
-                "une commande."
+                ":loop doit contenir une commande."
             )
 
         count_text = parts[0]
@@ -2644,10 +1982,7 @@ class SysTeen:
         if len(parts) == 3:
             command += " " + parts[2]
 
-        self.execute_inline_loop(
-            count_text,
-            command
-        )
+        self.execute_inline_loop(count_text, command)
 
         return line_index + 1
 
@@ -2655,13 +1990,8 @@ class SysTeen:
     # EXECUTION D'UNE LIGNE
     # =========================================================
 
-    def execute_line(
-        self,
-        line_index
-    ):
-        raw_line = self.lines[
-            line_index
-        ]
+    def execute_line(self, line_index):
+        raw_line = self.lines[line_index]
 
         line = raw_line.strip()
 
@@ -2679,22 +2009,13 @@ class SysTeen:
         if not command_line:
             return line_index + 1
 
-        parts = command_line.split(
-            maxsplit=1
-        )
+        parts = command_line.split(maxsplit=1)
 
         command = parts[0]
 
-        args = (
-            parts[1]
-            if len(parts) > 1
-            else ""
-        )
+        args = parts[1] if len(parts) > 1 else ""
 
-        # -----------------------------------------------------
         # SYSTEME
-        # -----------------------------------------------------
-
         if command == "systeen":
 
             option = args.strip()
@@ -2710,39 +2031,26 @@ class SysTeen:
 
                 return line_index + 1
 
-            raise SysTeenError(
-                "Commande systeen inconnue."
-            )
+            raise SysTeenError("Commande systeen inconnue.")
 
-        # -----------------------------------------------------
         # VERSION / MISE A JOUR
-        # -----------------------------------------------------
-
         if command == "v":
             self.command_version(args)
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # VARIABLES
-        # -----------------------------------------------------
-
         if command == "var":
             self.command_var(args)
 
             return line_index + 1
 
         if command == "save":
-            self.save_variable(
-                args.strip()
-            )
+            self.save_variable(args.strip())
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # SAY
-        # -----------------------------------------------------
-
         if command == "say":
             self.command_say(args)
 
@@ -2753,19 +2061,13 @@ class SysTeen:
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # MATH
-        # -----------------------------------------------------
-
         if command == "math":
             self.command_math(args)
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # LINUX
-        # -----------------------------------------------------
-
         if command == "cmd":
             self.command_cmd(args)
 
@@ -2786,23 +2088,14 @@ class SysTeen:
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # SUPPRESSION
-        # -----------------------------------------------------
-
         if command == "del":
-            self.command_del(
-                args,
-                fallback_sudo=False
-            )
+            self.command_del(args, fallback_sudo=False)
 
             return line_index + 1
 
         if command == "del!":
-            self.command_del(
-                args,
-                fallback_sudo=True
-            )
+            self.command_del(args, fallback_sudo=True)
 
             return line_index + 1
 
@@ -2811,36 +2104,22 @@ class SysTeen:
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # FICHIERS
-        # -----------------------------------------------------
-
         if command == "crea":
             self.command_crea(args)
 
             return line_index + 1
 
         if command == "edit":
-            return (
-                self.command_edit(
-                    line_index,
-                    args
-                ) + 1
-            )
+            return self.command_edit(line_index, args) + 1
 
-        # -----------------------------------------------------
         # WAIT
-        # -----------------------------------------------------
-
         if command == "wait":
             self.command_wait(args)
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # SYSTEME
-        # -----------------------------------------------------
-
         if command == "re":
             self.command_reboot()
 
@@ -2851,20 +2130,13 @@ class SysTeen:
 
             return line_index + 1
 
-        # -----------------------------------------------------
         # IF
-        # -----------------------------------------------------
-
         if command == "if":
 
-            result = self.parse_condition(
-                args
-            )
+            result = self.parse_condition(args)
 
-            else_line, end_line = (
-                self.find_if_structure(
-                    line_index + 1
-                )
+            else_line, end_line = self.find_if_structure(
+                line_index + 1
             )
 
             if result:
@@ -2875,40 +2147,22 @@ class SysTeen:
 
             return end_line + 1
 
-        # -----------------------------------------------------
         # ELSE
-        # -----------------------------------------------------
-
         if command == "else":
 
-            _, end_line = (
-                self.find_if_structure(
-                    line_index + 1
-                )
-            )
+            _, end_line = self.find_if_structure(line_index + 1)
 
             return end_line + 1
 
-        # -----------------------------------------------------
         # ELSEND
-        # -----------------------------------------------------
-
         if command == "elsend":
             return line_index + 1
 
-        # -----------------------------------------------------
         # LOOP
-        # -----------------------------------------------------
-
         if command == "loop":
-            return self.command_loop(
-                line_index,
-                args
-            )
+            return self.command_loop(line_index, args)
 
-        raise SysTeenError(
-            f"Commande inconnue : :{command}"
-        )
+        raise SysTeenError(f"Commande inconnue : :{command}")
 
     # =========================================================
     # VAR
@@ -2917,58 +2171,40 @@ class SysTeen:
     def command_var(self, args):
 
         if not args:
-            raise SysTeenError(
-                "Syntaxe : :var add [nom]"
-            )
+            raise SysTeenError("Syntaxe : :var add [nom]")
 
         if args.strip() == "sys":
             self.command_var_sys()
             return
 
-        parts = args.split(
-            maxsplit=2
-        )
+        parts = args.split(maxsplit=2)
 
         if parts[0] == "add":
 
             if len(parts) != 2:
-                raise SysTeenError(
-                    "Syntaxe : :var add [nom]"
-                )
+                raise SysTeenError("Syntaxe : :var add [nom]")
 
-            self.create_variable(
-                parts[1]
-            )
+            self.create_variable(parts[1])
 
             return
 
         if parts[0] == "rm":
 
             if len(parts) != 2:
-                raise SysTeenError(
-                    "Syntaxe : :var rm [nom]"
-                )
+                raise SysTeenError("Syntaxe : :var rm [nom]")
 
-            self.remove_variable(
-                parts[1]
-            )
+            self.remove_variable(parts[1])
 
             return
 
         if "=" in args:
 
-            name, value = args.split(
-                "=",
-                1
-            )
+            name, value = args.split("=", 1)
 
             name = name.strip()
             value = value.strip()
 
-            self.set_variable(
-                name,
-                self.interpolate(value)
-            )
+            self.set_variable(name, self.interpolate(value))
 
             return
 
@@ -2998,17 +2234,11 @@ class SysTeen:
 
                     try:
 
-                        line_index = (
-                            self.execute_line(
-                                line_index
-                            )
-                        )
+                        line_index = self.execute_line(line_index)
 
                     except SysTeenError as error:
 
-                        print(
-                            f"[SysTeen] Erreur : {error}"
-                        )
+                        print(f"[SysTeen] Erreur : {error}")
 
                         line_index += 1
 
@@ -3028,9 +2258,7 @@ class SysTeen:
 
         except KeyboardInterrupt:
 
-            print(
-                "\n[SysTeen] Programme interrompu."
-            )
+            print("\n[SysTeen] Programme interrompu.")
 
         finally:
 
@@ -3043,65 +2271,96 @@ class SysTeen:
 # MAIN
 # =============================================================
 
+def print_usage():
+    print("Utilisation :")
+    print("  python systeen.py fichier.st      Exécuter un script SysTeen")
+    print("  python systeen.py --maj           Mettre à jour vers la dernière version")
+    print("  python systeen.py --maj 0.4.2     Installer une version précise (rollback)")
+    print("  python systeen.py --version       Afficher la version installée")
+    print("  python systeen.py --help          Afficher cette aide")
+
+
+def run_update_mode(arguments):
+    """
+    python systeen.py --maj [version]
+    """
+
+    if len(arguments) > 1:
+        print_usage()
+        sys.exit(1)
+
+    target = arguments[0] if arguments else ""
+
+    systeen = SysTeen(None)
+    systeen.restart_after_install = False
+
+    try:
+        systeen.command_version(target)
+
+    except SysTeenError as error:
+        print(f"[SysTeen] Erreur : {error}")
+        sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n[SysTeen] Arrêt.")
+        sys.exit(130)
+
+    except Exception as error:
+        print(f"[SysTeen] Erreur inattendue : {error}")
+        sys.exit(1)
+
+
 def main():
 
-    if len(sys.argv) != 2:
+    arguments = sys.argv[1:]
 
-        print(
-            "Utilisation : "
-            "python systeen.py fichier.st"
-        )
+    if arguments and arguments[0] in ("--help", "-h"):
+        print_usage()
+        sys.exit(0)
+
+    if arguments and arguments[0] in ("--version", "-V"):
+        print(f"SysTeen {VERSION}")
+        sys.exit(0)
+
+    if arguments and arguments[0] in ("--maj", "--update"):
+        run_update_mode(arguments[1:])
+        sys.exit(0)
+
+    if len(arguments) != 1:
+
+        print_usage()
 
         sys.exit(1)
 
     try:
 
-        systeen = SysTeen(
-            sys.argv[1]
-        )
+        systeen = SysTeen(arguments[0])
 
-        # -----------------------------------------------------
-        # CHARGEMENT DE LA PREFERENCE DE SECURITE
-        # -----------------------------------------------------
-
-        config_exists = (
-            systeen.load_security_config()
-        )
+        # Chargement de la préférence de sécurité
+        config_exists = systeen.load_security_config()
 
         if not config_exists:
             systeen.ask_security_preference()
 
-        # -----------------------------------------------------
-        # CONFIRMATION DU LANCEMENT
-        # -----------------------------------------------------
-
+        # Confirmation du lancement
         if not systeen.confirm_script_launch():
 
-            print(
-                "[SysTeen] Exécution annulée."
-            )
+            print("[SysTeen] Exécution annulée.")
 
             sys.exit(0)
 
-        # -----------------------------------------------------
-        # EXECUTION
-        # -----------------------------------------------------
-
+        # Exécution
         systeen.run()
 
     except SysTeenError as error:
 
-        print(
-            f"[SysTeen] Erreur : {error}"
-        )
+        print(f"[SysTeen] Erreur : {error}")
 
         sys.exit(1)
 
     except KeyboardInterrupt:
 
-        print(
-            "\n[SysTeen] Arrêt."
-        )
+        print("\n[SysTeen] Arrêt.")
 
         sys.exit(130)
 
