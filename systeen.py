@@ -21,13 +21,34 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 
 # Phrase à taper pour confirmer la désinstallation
 UNINSTALL_PHRASE = "iwantuninstallsysteenandthesysteenprojet"
 
 # Profondeur maximale de scripts lancés les uns par les autres avec :go
 MAX_GO_DEPTH = 5
+
+# Terminaux graphiques pris en charge par :go, dans l'ordre d'essai.
+# Chaque entrée construit les arguments qui suivent le nom du terminal
+# pour exécuter la commande `c` (une liste d'arguments).
+TERMINAL_STYLES = {
+    "xdg-terminal-exec": lambda c: list(c),
+    "gnome-terminal": lambda c: ["--"] + list(c),
+    "konsole": lambda c: ["-e"] + list(c),
+    "xfce4-terminal": lambda c: ["-x"] + list(c),
+    "mate-terminal": lambda c: ["-x"] + list(c),
+    "lxterminal": lambda c: ["-e"] + list(c),
+    "qterminal": lambda c: ["-e", shlex.join(c)],
+    "tilix": lambda c: ["-e", shlex.join(c)],
+    "terminator": lambda c: ["-x"] + list(c),
+    "alacritty": lambda c: ["-e"] + list(c),
+    "kitty": lambda c: list(c),
+    "wezterm": lambda c: ["start", "--"] + list(c),
+    "foot": lambda c: list(c),
+    "xterm": lambda c: ["-e"] + list(c),
+    "x-terminal-emulator": lambda c: ["-e"] + list(c),
+}
 
 # =============================================================
 # MISE A JOUR SECURISEE
@@ -167,6 +188,10 @@ class SysTeen:
         # Redémarrer SysTeen après une mise à jour réussie
         # (désactivé en mode "python systeen.py --maj")
         self.restart_after_install = True
+
+        # Vrai quand ce script tourne dans la fenêtre ouverte par :go
+        # (la fenêtre attend alors une touche avant de se fermer)
+        self.window_mode = False
 
         self.update_fingerprint = None
 
@@ -1153,8 +1178,115 @@ class SysTeen:
         subprocess.run(["pkill", "-x", program], check=False)
 
     # =========================================================
-    # GO : lancer un second script SysTeen en parallèle
+    # GO : lancer un second script SysTeen dans une nouvelle fenêtre
     # =========================================================
+
+    @staticmethod
+    def has_graphical_session():
+        """Vrai si un affichage graphique (X11 ou Wayland) est disponible."""
+
+        return bool(
+            os.environ.get("DISPLAY")
+            or os.environ.get("WAYLAND_DISPLAY")
+        )
+
+    @staticmethod
+    def terminal_candidates(command):
+        """
+        Retourne la liste des (nom, commande complète) de terminaux
+        graphiques installés, dans l'ordre d'essai.
+
+        Si la variable d'environnement TERMINAL désigne un terminal
+        connu, il passe en premier.
+        """
+
+        names = list(TERMINAL_STYLES)
+
+        preferred = os.environ.get("TERMINAL", "").strip()
+
+        if preferred:
+            try:
+                parts = shlex.split(preferred)
+            except ValueError:
+                parts = []
+
+            if parts:
+                preferred_name = Path(parts[0]).name
+
+                if preferred_name in TERMINAL_STYLES:
+                    names.remove(preferred_name)
+                    names.insert(0, preferred_name)
+
+        candidates = []
+
+        for name in names:
+            binary = shutil.which(name)
+
+            if binary is None:
+                continue
+
+            candidates.append(
+                (name, [binary] + TERMINAL_STYLES[name](command))
+            )
+
+        return candidates
+
+    def open_terminal_window(self, command, env):
+        """
+        Ouvre une nouvelle fenêtre de terminal visible qui exécute
+        `command`. Retourne le nom du terminal utilisé.
+
+        Le terminal est détaché de ce processus (nouvelle session,
+        entrées/sorties coupées) : le second script a son propre
+        clavier et ne perturbe jamais le terminal d'origine.
+        """
+
+        if not self.has_graphical_session():
+            raise SysTeenError(
+                ":go ouvre une fenêtre de terminal, mais aucun "
+                "affichage graphique n'a été détecté "
+                "(DISPLAY / WAYLAND_DISPLAY absents)."
+            )
+
+        candidates = self.terminal_candidates(command)
+
+        if not candidates:
+            raise SysTeenError(
+                "Aucun terminal graphique trouvé. Installez-en un "
+                "(par exemple xterm, gnome-terminal, konsole ou "
+                "xfce4-terminal)."
+            )
+
+        for name, argv in candidates:
+            try:
+                process = subprocess.Popen(
+                    argv,
+                    env=env,
+                    cwd=str(Path.cwd()),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+
+            except OSError:
+                continue
+
+            # Certains terminaux (gnome-terminal...) rendent la main
+            # tout de suite avec le code 0 ; d'autres restent ouverts.
+            # Un code d'erreur immédiat veut dire que ce terminal n'a
+            # pas pu s'ouvrir : on essaie le suivant.
+            time.sleep(0.6)
+
+            code = process.poll()
+
+            if code is None or code == 0:
+                return name
+
+        raise SysTeenError(
+            "Impossible d'ouvrir une fenêtre de terminal "
+            "(tous les terminaux testés ont échoué)."
+        )
 
     def command_go(self, content):
         """
@@ -1164,7 +1296,10 @@ class SysTeen:
         :go /home/user/fichier.st
             Chemin absolu (le ~ est aussi accepté).
 
-        Le second script tourne en parallèle dans un autre processus.
+        Le second script s'exécute dans une NOUVELLE FENÊTRE de
+        terminal, visible et indépendante, avec son propre clavier.
+        La fenêtre attend une touche à la fin pour laisser lire
+        les messages.
         """
 
         target = self.interpolate(content.strip())
@@ -1213,7 +1348,7 @@ class SysTeen:
         print()
         print(
             f"[SysTeen] Le script va lancer {path.name} "
-            "en parallèle."
+            "dans une nouvelle fenêtre."
         )
         print(f"[SysTeen] Chemin : {path}")
         print(
@@ -1228,17 +1363,20 @@ class SysTeen:
         env = os.environ.copy()
         env["SYSTEEN_GO_DEPTH"] = str(depth + 1)
 
-        subprocess.Popen(
-            [
-                sys.executable,
-                str(self.program_path),
-                str(path),
-                "--no-confirm",
-            ],
-            env=env
-        )
+        command = [
+            sys.executable,
+            str(self.program_path),
+            str(path),
+            "--no-confirm",
+            "--go-window",
+        ]
 
-        print(f"[SysTeen] {path.name} lancé en parallèle.")
+        terminal = self.open_terminal_window(command, env)
+
+        print(
+            f"[SysTeen] {path.name} lancé dans une nouvelle "
+            f"fenêtre ({terminal})."
+        )
 
     # =========================================================
     # :# (relance en root puis arrêt du script)
@@ -1284,6 +1422,10 @@ class SysTeen:
             str(self.script_path),
             "--no-confirm",
         ]
+
+        # Dans une fenêtre ouverte par :go, on garde la pause finale
+        if self.window_mode:
+            command.append("--go-window")
 
         print(
             "[SysTeen] Relance en root : "
@@ -2112,6 +2254,11 @@ class SysTeen:
         if self.script_path is not None:
             arguments.append(str(self.script_path))
 
+            # Dans une fenêtre ouverte par :go, on garde la fenêtre
+            # (sans reposer la question de lancement)
+            if self.window_mode:
+                arguments.extend(["--no-confirm", "--go-window"])
+
         try:
             os.execv(sys.executable, arguments)
 
@@ -2851,6 +2998,25 @@ def print_usage():
     print("  python systeen.py --help          Afficher cette aide")
 
 
+def wait_before_closing():
+    """
+    Pause finale dans la fenêtre ouverte par :go, pour que
+    l'utilisateur ait le temps de lire les messages avant que
+    la fenêtre ne se ferme.
+    """
+
+    print()
+
+    try:
+        input(
+            "[SysTeen] Script terminé. "
+            "Appuyez sur Entrée pour fermer cette fenêtre..."
+        )
+
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+
 def run_simple_mode(arguments, action):
     """
     Modes sans script ni argument : --readme, --change, --uninstall.
@@ -2913,12 +3079,18 @@ def main():
 
     arguments = sys.argv[1:]
 
-    # Option interne (non documentée) : utilisée par :go et :#
-    # pour ne pas redemander la confirmation de lancement.
+    # Options internes (non documentées) :
+    #   --no-confirm : utilisée par :go et :# pour ne pas redemander
+    #                  la confirmation de lancement.
+    #   --go-window  : indique que ce script tourne dans la fenêtre
+    #                  ouverte par :go (pause avant fermeture).
     no_confirm = "--no-confirm" in arguments
+    window_mode = "--go-window" in arguments
 
-    if no_confirm:
-        arguments = [a for a in arguments if a != "--no-confirm"]
+    arguments = [
+        a for a in arguments
+        if a not in ("--no-confirm", "--go-window")
+    ]
 
     if arguments and arguments[0] in ("--help", "-h"):
         print_usage()
@@ -2971,11 +3143,18 @@ def main():
             "[SysTeen] Si vous voulez de l'aide, tapez : "
             "python systeen.py --help"
         )
+
+        if window_mode:
+            wait_before_closing()
+
         sys.exit(1)
+
+    exit_code = 0
 
     try:
 
         systeen = SysTeen(os.path.expanduser(target))
+        systeen.window_mode = window_mode
 
         # Chargement de la préférence de sécurité
         config_exists = systeen.load_security_config()
@@ -2991,6 +3170,13 @@ def main():
 
             sys.exit(0)
 
+        if window_mode:
+            print(
+                "[SysTeen] Fenêtre ouverte par :go : "
+                f"{systeen.script_path.name}"
+            )
+            print()
+
         # Exécution
         systeen.run()
 
@@ -2998,13 +3184,19 @@ def main():
 
         print(f"[SysTeen] Erreur : {error}")
 
-        sys.exit(1)
+        exit_code = 1
 
     except KeyboardInterrupt:
 
         print("\n[SysTeen] Arrêt.")
 
-        sys.exit(130)
+        exit_code = 130
+
+    # Fenêtre de :go : on laisse le temps de lire avant de fermer
+    if window_mode:
+        wait_before_closing()
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
