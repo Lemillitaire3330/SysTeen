@@ -1,635 +1,397 @@
-SysTeen v0.6.0 :
 # SysTeen
 
-**SysTeen** est un interpréteur de scripts conçu pour Linux, développé par SLNE Studio. Il permet d'automatiser des tâches, de manipuler des fichiers, de gérer des variables, d'effectuer des calculs et d'exécuter des commandes système à l'aide d'un langage simple.
+**SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
+Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-- **Version :** 0.6.0
-- **Langage d'implémentation :** Python 3
-- **Plateforme principale :** Linux
-- **Licence :** GNU General Public License v3.0 (GPL-3.0)
-- **Dépôt :** [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
+> Version actuelle : **0.7.0**
+> Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
 
 ## Sommaire
 
-- [Présentation](#présentation)
-- [Fonctionnalités](#fonctionnalités)
-- [Prérequis](#prérequis)
-- [Installation](#installation)
-- [Utilisation](#utilisation)
-- [Syntaxe du langage](#syntaxe-du-langage)
-- [Variables](#variables)
-- [Affichage et saisie](#affichage-et-saisie)
-- [Calculs mathématiques](#calculs-mathématiques)
-- [Conditions](#conditions)
-- [Boucles](#boucles)
-- [Gestion des fichiers](#gestion-des-fichiers)
-- [Commandes système](#commandes-système)
-- [Variables système](#variables-système)
-- [Mise à jour](#mise-à-jour)
-- [Sécurité](#sécurité)
-- [Gestion des erreurs](#gestion-des-erreurs)
-- [Licence](#licence)
-- [Auteur](#auteur)
-
-## Présentation
-
-SysTeen est un projet qui vise à rendre l'automatisation sous Linux accessible grâce à un langage de script dédié.
-
-Les scripts SysTeen utilisent l'extension `.st` et reposent sur des commandes commençant par `:`.
-
-Chaque script doit commencer par la ligne suivante :
-
-```text
-:systeen start
-```
-
-Un script se termine normalement avec :
-
-```text
-:systeen end
-```
-
-SysTeen lit et exécute les commandes du fichier dans l'ordre, tout en permettant l'utilisation de variables, de conditions, de boucles et d'opérations sur le système.
-
-## Fonctionnalités
-
-- Création, modification et suppression de fichiers et de dossiers.
-- Gestion de variables et sauvegarde persistante de certaines valeurs.
-- Affichage de texte et saisie interactive de l'utilisateur.
-- Calculs mathématiques avec un ensemble limité d'opérateurs.
-- Conditions avec comparaisons numériques et textuelles.
-- Boucles répétitives et boucles par retour à une ligne.
-- Exécution de commandes Linux.
-- Lancement et arrêt de processus.
-- Navigation entre les dossiers.
-- Temporisation de scripts.
-- Consultation d'informations sur le système.
-- Protection configurable contre la suppression de `/` et du dossier personnel.
-- Mise à jour du programme et du README avec vérification de signatures PGP.
-
-## Prérequis
-
-Avant d'utiliser SysTeen, assurez-vous de disposer des éléments suivants :
-
-- Linux.
-- Python 3.
-- GPG (`gpg`) pour les mises à jour vérifiées.
-- `sudo` si vous utilisez les commandes de suppression nécessitant des privilèges élevés.
-
-La plupart des fonctionnalités standard utilisent uniquement les bibliothèques intégrées à Python.
-
-## Installation
-
-### 1. Récupérer le projet
-
-Clonez le dépôt GitHub :
-
-```bash
-git clone https://github.com/Lemillitaire3330/SysTeen.git
-```
-
-Accédez ensuite au dossier :
-
-```bash
-cd SysTeen
-```
-
-### 2. Vérifier Python
-
-```bash
-python3 --version
-```
-
-### 3. Afficher l'aide
-
-Depuis le dossier contenant `systeen.py`, exécutez :
-
-```bash
-python3 systeen.py --help
-```
-
-Pour connaître la version installée :
-
-```bash
-python3 systeen.py --version
-```
-
-## Utilisation
-
-SysTeen accepte plusieurs modes d'exécution.
-
-| Commande | Description |
-|---|---|
-| `python3 systeen.py fichier.st` | Exécute un script SysTeen |
-| `python3 systeen.py --help` | Affiche l'aide |
-| `python3 systeen.py --version` | Affiche la version installée |
-| `python3 systeen.py --maj` | Recherche et installe la dernière version |
-| `python3 systeen.py --maj 0.4.2` | Demande l'installation d'une version précise |
-| `python3 systeen.py --update` | Alias de `--maj` |
-| `python3 systeen.py --readme` | Affiche le README installé |
-
-Le fichier `README.md` doit se trouver à côté de `systeen.py` pour être affiché avec `--readme`.
-
-### Exemple de script
-
-Créez un fichier `bonjour.st` :
-
-```text
-:systeen start
-
-:say Bonjour !
-:say Bienvenue dans SysTeen.
-
-:systeen end
-```
-
-Exécutez-le avec :
-
-```bash
-python3 systeen.py bonjour.st
-```
-
-Au lancement, SysTeen demande une confirmation avant d'exécuter le script. Lors de la première configuration, il demande également si la protection des chemins système doit être activée.
-
-## Syntaxe du langage
-
-Les commandes SysTeen commencent par `:`.
-
-Les lignes vides et les lignes commençant par `#` sont ignorées.
-
-Exemple :
-
-```text
-# Ceci est un commentaire
-:systeen start
-
-:say Ceci est une commande.
-
-:systeen end
-```
-
-## Variables
-
-Les variables permettent de stocker des valeurs et de les réutiliser dans un script.
-
-### Créer une variable
-
-```text
-:var add nom
-```
-
-Une nouvelle variable reçoit initialement la valeur `X`.
-
-### Modifier une variable
-
-```text
-:var nom = Alice
-```
-
-### Utiliser une variable
-
-Le caractère `$` permet d'insérer la valeur d'une variable dans un texte.
-
-```text
-:say Bonjour $nom !
-```
-
-Résultat :
-
-```text
-Bonjour Alice !
-```
-
-### Supprimer une variable
-
-```text
-:var rm nom
-```
-
-### Sauvegarder une variable
-
-```text
-:var add compteur
-:var compteur = 42
-:save compteur
-```
-
-Les variables sauvegardées sont conservées dans un fichier `.vars` associé au script. Elles sont rechargées lors d'une prochaine exécution.
-
-## Affichage et saisie
-
-### Afficher du texte
-
-```text
-:say Bonjour tout le monde !
-```
-
-### Demander une saisie
-
-La commande `:say?` permet de poser une question et de stocker la réponse dans une variable existante.
-
-```text
-:var add prenom
-:say? Quel est votre prénom ? ; prenom
-:say Bonjour $prenom !
-```
-
-La variable doit être créée avant la saisie.
-
-## Calculs mathématiques
-
-La commande `:math` permet d'évaluer une expression mathématique.
-
-### Afficher un résultat
-
-```text
-:math 5 + 3
-```
-
-Résultat :
-
-```text
-8
-```
-
-### Stocker un résultat
-
-```text
-:var add resultat
-:math 10 * 5 ; resultat
-:say Résultat : $resultat
-```
-
-Les opérateurs pris en charge sont :
-
-| Opérateur | Signification |
-|---|---|
-| `+` | Addition |
-| `-` | Soustraction |
-| `*` | Multiplication |
-| `/` | Division |
-| `//` | Division entière |
-| `%` | Modulo |
-| `**` | Puissance |
-
-Les parenthèses peuvent être utilisées pour organiser les expressions.
-
-```text
-:math (2 + 3) * 4
-```
-
-Les expressions sont évaluées à l'aide d'un analyseur limité aux constantes numériques et aux opérateurs autorisés, et non par l'exécution directe de code Python arbitraire.
-
-## Conditions
-
-Les conditions permettent d'exécuter différentes parties d'un script en fonction d'une valeur.
-
-### Comparaison de valeurs
-
-```text
-:systeen start
-
-:var add age
-:var age = 18
-
-:if $age >= 18
-:say Vous êtes majeur.
-:else
-:say Vous êtes mineur.
-:elsend
-
-:systeen end
-```
-
-### Opérateurs de comparaison
-
-- `==` : égalité.
-- `!=` : différence.
-- `>` : supérieur à.
-- `<` : inférieur à.
-- `>=` : supérieur ou égal.
-- `<=` : inférieur ou égal.
-
-### Conditions textuelles
-
-SysTeen prend également en charge les opérateurs suivants :
-
-- `contains` : vérifie si un texte contient une chaîne.
-- `not contains` : vérifie si un texte ne contient pas une chaîne.
-- `startswith` : vérifie le début d'une chaîne.
-- `endswith` : vérifie la fin d'une chaîne.
-
-Exemple :
-
-```text
-:var add message
-:var message = Bonjour SysTeen
-
-:if $message contains SysTeen
-:say Le nom SysTeen est présent.
-:elsend
-```
-
-Syntaxe :
-
-```text
-:if [condition]
-:else [condition]
-:elsend [ferme les conditions]. 
-```
-Un if/else peut être intégré dans un autre if/else
-
-### Vérifier une variable ou un fichier
-
-```text
-:if exist $nom
-:say La variable existe.
-:elsend
-```
-
-Pour tester l'existence d'un fichier ou d'un dossier :
-
-```text
-:if exist document.txt
-:say Le fichier existe.
-:elsend
-```
-
-Autres conditions disponibles :
-
-- `not exist` : vérifie l'absence d'une variable ou d'un chemin.
-- `empty` : vérifie si une variable est vide.
-- `notempty` : vérifie si une variable n'est pas vide.
-
-## Boucles
-
-SysTeen propose deux formes de boucles.
-
-### Répéter une commande
-
-```text
-:loop 3 say Bonjour !
-```
-
-Cette commande affiche `Bonjour !` trois fois.
-
-### Boucle infinie
-
-```text
-:loop inf say Le programme tourne.
-```
-
-Une boucle infinie se poursuit tant que le programme est en cours d'exécution. Utilisez `Ctrl+C` pour interrompre le programme.
-
-### Boucle par numéro de ligne
-
-```text
-:systeen start
-:say Répétition
-:loop L2-3
-:systeen end
-```
-
-La syntaxe `L2-3` demande de revenir à la ligne 2 selon le compteur de répétitions de la boucle.
-
-La forme `L2-inf` permet un retour répété sans limite définie.
-
-**Attention :** les boucles infinies peuvent monopoliser le processeur si elles ne comportent aucune temporisation.
-
-## Gestion des fichiers
-
-### Créer un fichier
-
-```text
-:crea notes.txt
-```
-
-### Créer un dossier
-
-```text
-:crea documents
-```
-
-### Écrire dans un fichier
-
-```text
-:edit notes.txt "Mon texte"
-```
-
-La commande `:edit` crée le fichier ou remplace son contenu par le texte indiqué. Elle accepte également du texte réparti sur plusieurs lignes jusqu'au guillemet fermant.
-
-### Supprimer un fichier ou un dossier
-
-```text
-:del notes.txt
-```
-
-La commande `:del` supprime un fichier ou un dossier. Pour un dossier, son contenu est également supprimé.
-
-Les commandes suivantes sont également disponibles :
-
-- `:del!` : réessaie avec `sudo` en cas de refus d'accès.
-- `:rmf` : utilise directement `sudo rm -rf`.
-
-**Attention :** ces commandes peuvent entraîner une perte définitive de données. Vérifiez toujours le chemin avant de les utiliser.
-
-Les protections intégrées bloquent par défaut les suppressions directes de `/` et du dossier personnel lorsque la sécurité est activée. Elles ne constituent toutefois pas une garantie contre toutes les suppressions dangereuses.
-
-## Commandes système
-
-SysTeen permet d'interagir avec le système Linux.
-
-| Commande | Description |
-|---|---|
-| `:cmd` | Exécute une commande dans un shell |
-| `:run` | Lance un programme |
-| `:stop` | Demande l'arrêt d'un processus par son nom |
-| `:cd` | Change le dossier de travail |
-| `:wait` | Met le script en pause |
-| `:re` | Demande le redémarrage du système |
-| `:off` | Demande l'arrêt du système |
-
-### Exemples
-
-Afficher le contenu d'un dossier :
-
-```text
-:cmd ls -la
-```
-
-Lancer un programme :
-
-```text
-:run firefox
-```
-
-Arrêter un processus :
-
-```text
-:stop firefox
-```
-
-Changer de dossier :
-
-```text
-:cd /tmp
-```
-
-Attendre cinq secondes :
-
-```text
-:wait 5 sec
-```
-
-Les unités acceptées par `:wait` sont `sec`, `min`, `h`, `j` et `y`.
-
-**Important :** `:cmd` exécute une commande avec `shell=True`. Les scripts SysTeen doivent donc être considérés comme du code potentiellement dangereux, particulièrement lorsqu'ils proviennent d'une source inconnue.
-
-## Variables système
-
-La commande suivante charge des informations système dans des variables :
-
-```text
-:var sys
-```
-
-Variables disponibles :
-
-| Variable | Description |
-|---|---|
-| `$sys.ram` | Mémoire vive totale |
-| `$sys.user` | Nom de l'utilisateur |
-| `$sys.stockage` | Espace disque libre du dossier du programme |
-| `$sys.os` | Nom de la distribution Linux |
-| `$sys.perms` | Permissions du fichier Python |
-| `$sys.battery` | Niveau de batterie, si disponible |
-| `$sys.hostname` | Nom de la machine |
-| `$sys.kernel` | Version du noyau |
-| `$sys.arch` | Architecture du processeur |
-| `$sys.cpu` | Informations sur le processeur |
-| `$sys.cores` | Nombre de processeurs logiques détectés |
-| `$sys.cwd` | Dossier de travail courant |
-| `$sys.script` | Chemin du script `.st` |
-| `$sys.home` | Dossier personnel |
-| `$sys.python` | Version de Python |
-| `$sys.shell` | Shell indiqué par l'environnement |
-| `$sys.uptime` | Temps de fonctionnement du système |
-
-Exemple :
-
-```text
-:systeen start
-
-:var sys
-:say Système : $sys.os
-:say Noyau : $sys.kernel
-:say Python : $sys.python
-:say RAM : $sys.ram
-
-:systeen end
-```
-
-Certaines informations peuvent être indisponibles selon l'environnement d'exécution.
-
-## Mise à jour
-
-SysTeen intègre un mécanisme de mise à jour depuis les releases GitHub.
-
-### Mettre à jour vers la dernière version
-
-```bash
-python3 systeen.py --maj
-```
-
-### Installer une version précise
-
-```bash
-python3 systeen.py --maj 0.4.2
-```
-
-Cette commande permet notamment de revenir à une version antérieure, si la release demandée existe.
-
-### Vérification cryptographique
-
-Le mécanisme de mise à jour :
-
-1. Récupère les fichiers de la release GitHub.
-2. Télécharge les signatures détachées PGP.
-3. Vérifie les signatures avec la clé publique intégrée.
-4. Contrôle l'empreinte de la clé.
-5. Vérifie la syntaxe Python et la version annoncée.
-6. Vérifie le contenu minimal du README.
-7. Prépare puis installe les fichiers validés.
-
-Les fichiers `systeen.py` et `README.md` doivent être accompagnés de leurs signatures respectives :
-
-- `systeen.py.asc`
-- `README.md.asc`
-
-La clé publique et l'empreinte doivent correspondre à celles du mainteneur attendu. Pour une sécurité optimale, vérifiez cette empreinte par un canal indépendant avant de faire confiance au mécanisme de mise à jour.
-
-Une signature valide prouve que le fichier correspond à une signature créée par la clé correspondante ; elle ne garantit pas à elle seule que le code est exempt de vulnérabilités.
-
-## Sécurité
-
-SysTeen intègre plusieurs mécanismes de précaution :
-
-- Confirmation avant le lancement d'un script.
-- Protection configurable contre la suppression de `/` et du dossier personnel.
-- Configuration de sécurité enregistrée dans `~/.config/systeen/config.json`.
-- Permissions restreintes sur le dossier et le fichier de configuration lorsque le système le permet.
-- Vérification PGP des fichiers téléchargés lors des mises à jour.
-
-### Bonnes pratiques
-
-- Lisez les scripts `.st` avant de les exécuter.
-- N'exécutez pas de script inconnu avec des privilèges élevés.
-- Soyez particulièrement prudent avec `:cmd`, `:del!`, `:rmf`, `:re` et `:off`.
-- Conservez des sauvegardes de vos données importantes.
-- Ne désactivez la protection contre les suppressions dangereuses que si vous comprenez les risques.
-
-La protection des chemins ne remplace pas les permissions Linux, les sauvegardes ou les autres mesures de sécurité du système.
-
-## Gestion des erreurs
-
-Lorsqu'une commande rencontre un problème, SysTeen affiche généralement un message préfixé par `[SysTeen] Erreur`.
-
-Exemples de problèmes possibles :
-
-- Fichier `.st` absent ou invalide.
-- Variable inexistante.
-- Expression mathématique non autorisée.
-- Syntaxe de condition incorrecte.
-- Commande inconnue.
-- Refus d'accès à un fichier.
-- Échec d'une mise à jour ou d'une vérification de signature.
-
-Vérifiez la syntaxe de la commande concernée et assurez-vous que les variables et les fichiers nécessaires existent.
-
-## Licence
-
-SysTeen est distribué sous la licence **GNU General Public License v3.0 (GPL-3.0)**.
-
-Vous pouvez utiliser, étudier, modifier et redistribuer ce logiciel conformément aux conditions de la GPL v3.
-
-Toute redistribution du logiciel, sous forme originale ou modifiée, doit respecter les obligations de la licence, notamment la conservation des mentions de droits d'auteur et de licence applicables ainsi que la fourniture du code source correspondant dans les conditions prévues par la GPL.
-
-Le texte intégral de la licence est disponible ici :
-
-https://www.gnu.org/licenses/gpl-3.0.html
-
-Pour distribuer le projet, il est recommandé d'inclure le texte officiel de la licence dans un fichier `LICENSE` à la racine du dépôt.
-
-## Auteur
-
-**SLNE Studio**
-
-Dépôt officiel : https://github.com/Lemillitaire3330/SysTeen
-
-Merci d'utiliser SysTeen !
+1. [Installation](#installation)
+2. [Premier script](#premier-script)
+3. [Options de `systeen.py`](#options-de-systeenpy)
+4. [Sécurité](#sécurité)
+5. [Référence des commandes](#référence-des-commandes)
+6. [Variables](#variables)
+7. [Conditions](#conditions)
+8. [Boucles](#boucles)
+9. [Mises à jour](#mises-à-jour)
+10. [Désinstallation](#désinstallation)
+11. [Notes de version](#notes-de-version)
 
 ---
 
-*SysTeen est un projet en évolution. Les fonctionnalités et la syntaxe décrites dans ce document correspondent à l'implémentation présentée dans le code source de la version 0.6.0.*
+## Installation
+
+Prérequis :
+
+- Linux
+- Python 3
+- `gpg` (uniquement pour les mises à jour signées)
+- `sudo` (uniquement pour `:#`, `:rmf` et `:del!`)
+
+Placez `systeen.py` dans un dossier de votre choix, puis :
+
+```bash
+python systeen.py --help
+```
+
+---
+
+## Premier script
+
+Un script SysTeen est un fichier avec l'extension **`.st`**.
+
+- La **première ligne** doit être `:systeen start`.
+- Chaque commande commence par `:`.
+- Une ligne qui commence par `#` est un commentaire.
+- Les lignes vides, et les lignes qui ne commencent pas par `:`, sont ignorées.
+
+```
+:systeen start
+
+# Mon premier script
+:var add nom
+:say? Comment tu t'appelles ? ; nom
+:say Bonjour $nom !
+
+:systeen end
+```
+
+Lancement :
+
+```bash
+python systeen.py mon_script.st
+```
+
+> **Important : un script recommence à la ligne 1 quand il arrive à la fin.**
+> Pour qu'il s'arrête, terminez-le par `:systeen end`.
+
+Avant chaque lancement, SysTeen rappelle l'état de la sécurité et demande confirmation (`Y/n`). Relisez toujours le code d'un script avant de l'exécuter.
+
+---
+
+## Options de `systeen.py`
+
+| Commande | Effet |
+|---|---|
+| `python systeen.py fichier.st` | Exécute un script SysTeen |
+| `python systeen.py --maj` | Met à jour vers la dernière version |
+| `python systeen.py --maj 0.6.0` | Installe une version précise (rollback) |
+| `python systeen.py --update` | Alias de `--maj` |
+| `python systeen.py --change` | Modifie le choix de la protection de `/` et du dossier personnel |
+| `python systeen.py --uninstall` | Désinstalle SysTeen |
+| `python systeen.py --readme` | Affiche ce README (celui installé à côté de `systeen.py`) |
+| `python systeen.py --version` (ou `-V`) | Affiche la version installée |
+| `python systeen.py --help` (ou `-h`) | Affiche l'aide |
+
+Si vous tapez un fichier ou une option qui n'existe pas, SysTeen vous l'indique et vous rappelle que `python systeen.py --help` donne de l'aide.
+
+---
+
+## Sécurité
+
+### Protection de `/` et du dossier personnel
+
+Au premier lancement, SysTeen demande si la protection doit être activée (**oui par défaut**).
+Quand elle est active, `:del`, `:del!` et `:rmf` refusent de supprimer `/` et votre dossier personnel.
+
+Le choix est enregistré dans `~/.config/systeen/config.json`.
+Il n'est pas définitif : `python systeen.py --change` permet de le modifier à tout moment.
+
+### À savoir
+
+- La protection ne concerne **que** `:del`, `:del!` et `:rmf`. Elle ne filtre **pas** ce que fait `:cmd`, qui exécute une commande shell telle quelle.
+- `:go` demande une confirmation avant de lancer un second script, car celui-ci n'a pas été relu.
+- Sous `sudo` (commande `:#`), SysTeen retrouve le vrai utilisateur grâce à `SUDO_USER` pour garder **sa** configuration de sécurité et **son** dossier personnel.
+- Ne lancez jamais un script `.st` dont vous ne comprenez pas le contenu.
+
+---
+
+## Référence des commandes
+
+### Structure
+
+| Commande | Description |
+|---|---|
+| `:systeen start` | Obligatoire en première ligne |
+| `:systeen end` | Arrête le script et sauvegarde les variables |
+
+### Affichage et saisie
+
+| Commande | Description |
+|---|---|
+| `:say texte` | Affiche un texte (les `$variables` sont remplacées) |
+| `:say? question ; variable` | Pose une question et stocke la réponse dans une variable **déjà créée** |
+
+### Calcul
+
+```
+:math 2 + 3 * 4
+:math $a * 2 ; resultat
+```
+
+Opérateurs : `+ - * / // % **` (et `+`/`-` unaires). Sans `; variable`, le résultat est affiché.
+L'expression est évaluée de façon sûre : aucun code Python arbitraire n'est exécuté.
+
+### Fichiers et dossiers
+
+| Commande | Description |
+|---|---|
+| `:add nom` | Crée un fichier si `nom` a une extension (`notes.txt`), sinon un dossier. Crée aussi les dossiers parents. Erreur si l'élément existe déjà |
+| `:edit fichier "texte"` | Écrit le texte dans le fichier (écrase le contenu). Le texte peut s'étendre sur plusieurs lignes, jusqu'au guillemet fermant |
+| `:del chemin` | Supprime un fichier ou un dossier |
+| `:del! chemin` | Comme `:del`, avec une nouvelle tentative via `sudo` si l'accès est refusé |
+| `:rmf chemin` | Supprime directement avec `sudo rm -rf` |
+| `:cd dossier` | Change le dossier courant |
+
+Exemple de `:edit` sur plusieurs lignes :
+
+```
+:edit notes.txt "Ligne 1
+Ligne 2
+Ligne 3"
+```
+
+> Le texte d'un `:edit` ne peut pas contenir de guillemet `"`.
+> L'ancienne commande `:crea` a été renommée `:add`.
+
+### Programmes et système
+
+| Commande | Description |
+|---|---|
+| `:cmd commande` | Exécute une commande Linux dans le terminal |
+| `:run programme` | Lance un programme en arrière-plan |
+| `:stop programme` | Arrête un programme par son nom (`pkill -x`) |
+| `:wait nombre unité` | Pause. Unités : `sec`, `min`, `h`, `j`, `y` |
+| `:re` | Redémarre l'ordinateur |
+| `:off` | Éteint l'ordinateur |
+
+### `:go` : lancer un second script en parallèle
+
+```
+:go autre.st
+:go /home/user/scripts/autre.st
+:go ~/scripts/autre.st
+```
+
+- Un chemin relatif est cherché **dans le dossier du script actuel**.
+- Le second script s'exécute dans un **autre processus**, en parallèle.
+- Le fichier doit exister et avoir l'extension `.st`.
+- Un script ne peut pas se relancer lui-même avec `:go`.
+- Les scripts lancés les uns par les autres sont limités à **5 niveaux**.
+- Une confirmation `Y/n` est demandée avant le lancement.
+- Les deux scripts partagent le même terminal : évitez les `:say?` simultanés.
+
+### `:#` : relancer le script en root
+
+```
+:systeen start
+:#
+:say Je suis root !
+:systeen end
+```
+
+`:#` fait, dans l'ordre :
+
+1. `cd` vers le dossier où se trouve `systeen.py` (retrouvé automatiquement) ;
+2. `sudo python systeen.py <ce script>` ;
+3. arrête le script actuel dès que `sudo` démarre.
+
+Il ne reste plus qu'à saisir le mot de passe root.
+
+À savoir :
+
+- Le script **repart depuis la première ligne** en root. Placez donc `:#` **tout en haut**, juste après `:systeen start`, sinon les lignes précédentes seront exécutées deux fois.
+- Si vous êtes déjà root, `:#` est ignoré (pas de boucle infinie).
+- Les variables sauvegardées avec `:save` sont écrites avant le passage en root.
+
+### Mise à jour depuis un script
+
+| Commande | Description |
+|---|---|
+| `:v` | Vérifie et installe la dernière version |
+| `:v 0.6.0` | Installe une version précise |
+
+---
+
+## Variables
+
+| Commande | Description |
+|---|---|
+| `:var add nom` | Crée une variable (valeur initiale : `X`) |
+| `:var nom = valeur` | Modifie une variable existante |
+| `:var rm nom` | Supprime une variable |
+| `:var sys` | Crée les variables système (voir plus bas) |
+| `:save nom` | Sauvegarde la variable dans un fichier `.vars` pour les prochains lancements |
+
+On utilise une variable avec `$` : `:say Bonjour $nom`.
+Un nom de variable peut contenir lettres, chiffres, `_` et `.`.
+Utiliser une variable qui n'existe pas affiche une erreur `Variable-404`.
+
+Les variables sauvegardées sont stockées à côté du script, dans `monscript.st.vars`, et rechargées automatiquement.
+
+### Variables système (`:var sys`)
+
+| Variable | Contenu |
+|---|---|
+| `$sys.user` | Nom de l'utilisateur |
+| `$sys.hostname` | Nom de la machine |
+| `$sys.os` | Distribution Linux |
+| `$sys.kernel` | Version du noyau |
+| `$sys.arch` | Architecture |
+| `$sys.cpu` | Processeur |
+| `$sys.cores` | Nombre de cœurs |
+| `$sys.ram` | Mémoire totale |
+| `$sys.stockage` | Espace libre là où se trouve le script |
+| `$sys.battery` | Niveau de batterie (`N/A` si aucune) |
+| `$sys.uptime` | Temps depuis le démarrage |
+| `$sys.cwd` | Dossier courant |
+| `$sys.script` | Chemin du script en cours |
+| `$sys.perms` | Permissions du script |
+| `$sys.home` | Dossier personnel |
+| `$sys.shell` | Shell de l'utilisateur |
+| `$sys.python` | Version de Python |
+
+---
+
+## Conditions
+
+```
+:if $age >= 18
+:say Majeur
+:else
+:say Mineur
+:elsend
+```
+
+Chaque `:if` doit se terminer par un `:elsend`. Le `:else` est facultatif. Les `:if` peuvent être imbriqués.
+
+À gauche d'une condition, il faut toujours une **variable** (sauf pour `exist`).
+
+| Condition | Vrai quand… |
+|---|---|
+| `$a == valeur` / `$a != valeur` | égal / différent |
+| `$a > valeur`, `<`, `>=`, `<=` | comparaison (numérique si possible) |
+| `$a contains texte` | contient le texte |
+| `$a not contains texte` | ne contient pas le texte |
+| `$a startswith texte` | commence par le texte |
+| `$a endswith texte` | finit par le texte |
+| `empty $a` | la variable est vide |
+| `notempty $a` | la variable n'est pas vide |
+| `exist $a` | la variable existe |
+| `exist chemin` | le fichier ou dossier existe (chemin relatif au script) |
+| `not exist $a` / `not exist chemin` | l'inverse |
+
+---
+
+## Boucles
+
+### Répéter une commande
+
+```
+:loop 3 :say Salut
+:loop inf :say Ça tourne...
+```
+
+Commandes acceptées dans une boucle : `:say`, `:cmd`, `:math`, `:wait`, `:run`, `:stop`, `:go`.
+
+### Sauter vers une ligne
+
+```
+:loop L5-3
+```
+
+Retourne à la **ligne 5**, **3 fois** (`:loop L5-inf` pour l'infini).
+
+Arrêtez un script à tout moment avec `Ctrl + C`.
+
+---
+
+## Mises à jour
+
+SysTeen se met à jour depuis les **releases GitHub** du projet, avec vérification **PGP** :
+
+```bash
+python systeen.py --maj
+```
+
+La mise à jour télécharge `systeen.py` et `README.md` avec leurs signatures, puis :
+
+1. vérifie que la clé PGP intégrée correspond à l'empreinte attendue ;
+2. vérifie les deux signatures détachées ;
+3. contrôle que la version du fichier correspond à la release ;
+4. n'installe qu'ensuite, en remplaçant les fichiers.
+
+En cas de problème, rien n'est installé. `gpg` doit être présent sur la machine.
+
+Empreinte de la clé de signature :
+
+```
+F7FE E16B FE36 DEAE 3507  9EFF 0FDD 49DB 07AC 253E
+```
+
+### Publier une version (mainteneur)
+
+Chaque release `vX.Y.Z` doit contenir exactement ces quatre fichiers :
+
+```bash
+gpg --armor --detach-sign systeen.py
+gpg --armor --detach-sign README.md
+```
+
+| Asset | Rôle |
+|---|---|
+| `systeen.py` | Le programme |
+| `systeen.py.asc` | Sa signature détachée |
+| `README.md` | Ce fichier |
+| `README.md.asc` | Sa signature détachée |
+
+Le tag doit correspondre à la variable `VERSION` de `systeen.py`. Toute modification d'un fichier après signature oblige à le re-signer.
+
+---
+
+## Désinstallation
+
+```bash
+python systeen.py --uninstall
+```
+
+SysTeen affiche la liste de ce qui sera supprimé, puis demande de taper exactement :
+
+```
+iwantuninstallsysteenandthesysteenprojet
+```
+
+Éléments supprimés :
+
+- `systeen.py` et `README.md` ;
+- les fichiers `.vars` créés par vos scripts ;
+- la configuration (`~/.config/systeen/`) ;
+- les fichiers de cache et de mise à jour temporaires.
+
+Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le code de `systeen.py` : elle disparaît avec lui.
+
+---
+
+## Notes de version
+
+### 0.7.0
+
+- `:crea` devient **`:add`**.
+- Nouvelle commande **`:go`** : lance un second script en parallèle.
+- Nouvelle commande **`:#`** : relance le script en root via `sudo`.
+- Nouvelle option **`--change`** : modifier le choix de protection de `/` et du dossier personnel.
+- Nouvelle option **`--uninstall`** : désinstallation complète avec phrase de confirmation.
+- Un fichier ou une option inexistants affichent un message clair et renvoient vers `--help`.
+- La configuration de sécurité reste celle de l'utilisateur réel, même sous `sudo`.
+
+---
+
+## Licence et contact
+
+Projet développé par **SLNE Studio**, un studio de programmation français.
+Merci d'utiliser les services SLNE.
