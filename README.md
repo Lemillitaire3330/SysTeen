@@ -3,7 +3,7 @@
 **SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
 Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-> Version actuelle : **0.7.0**
+> Version actuelle : **0.7.1**
 > Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
@@ -32,6 +32,7 @@ Prérequis :
 - Python 3
 - `gpg` (uniquement pour les mises à jour signées)
 - `sudo` (uniquement pour `:#`, `:rmf` et `:del!`)
+- un terminal graphique et une session graphique X11 ou Wayland (uniquement pour `:go`)
 
 Placez `systeen.py` dans un dossier de votre choix, puis :
 
@@ -170,7 +171,7 @@ Ligne 3"
 | `:re` | Redémarre l'ordinateur |
 | `:off` | Éteint l'ordinateur |
 
-### `:go` : lancer un second script en parallèle
+### `:go` : lancer un second script dans une nouvelle fenêtre
 
 ```
 :go autre.st
@@ -179,12 +180,18 @@ Ligne 3"
 ```
 
 - Un chemin relatif est cherché **dans le dossier du script actuel**.
-- Le second script s'exécute dans un **autre processus**, en parallèle.
+- Le second script s'ouvre dans une **nouvelle fenêtre de terminal visible**, avec son propre clavier : les deux scripts ne se perturbent plus (`:say?` compris).
+- Le script d'origine continue sans attendre.
+- À la fin du second script, la fenêtre affiche « Appuyez sur Entrée pour fermer cette fenêtre » pour laisser le temps de lire les messages.
 - Le fichier doit exister et avoir l'extension `.st`.
 - Un script ne peut pas se relancer lui-même avec `:go`.
 - Les scripts lancés les uns par les autres sont limités à **5 niveaux**.
-- Une confirmation `Y/n` est demandée avant le lancement.
-- Les deux scripts partagent le même terminal : évitez les `:say?` simultanés.
+- Une confirmation `Y/n` est demandée dans le terminal d'origine avant le lancement.
+
+Terminaux pris en charge, essayés dans cet ordre : `xdg-terminal-exec`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `mate-terminal`, `lxterminal`, `qterminal`, `tilix`, `terminator`, `alacritty`, `kitty`, `wezterm`, `foot`, `xterm`, `x-terminal-emulator`.
+Si la variable d'environnement `TERMINAL` désigne l'un d'eux, il passe en premier.
+
+Sans session graphique (SSH, console pure) ou sans terminal installé, `:go` affiche une erreur claire et ne lance rien.
 
 ### `:#` : relancer le script en root
 
@@ -378,6 +385,13 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 ---
 
 ## Notes de version
+
+### 0.7.1
+
+- **`:go` ouvre maintenant une nouvelle fenêtre de terminal** visible pour le second script, au lieu de le lancer dans le même terminal (fin des erreurs d'entrée clavier).
+- La fenêtre attend une touche à la fin du script pour laisser lire les messages.
+- Détection automatique du terminal graphique installé, avec essai du suivant si l'un échoue.
+- Message d'erreur clair quand il n'y a pas de session graphique ou pas de terminal.
 
 ### 0.7.0
 
