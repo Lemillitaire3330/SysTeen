@@ -6,6 +6,7 @@ import json
 import operator
 import os
 import platform
+import pwd
 import re
 import shlex
 import shutil
@@ -20,7 +21,13 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
+
+# Phrase à taper pour confirmer la désinstallation
+UNINSTALL_PHRASE = "iwantuninstallsysteenandthesysteenprojet"
+
+# Profondeur maximale de scripts lancés les uns par les autres avec :go
+MAX_GO_DEPTH = 5
 
 # =============================================================
 # MISE A JOUR SECURISEE
@@ -77,6 +84,28 @@ class SysTeenError(Exception):
     pass
 
 
+def get_real_home():
+    """
+    Retourne le dossier personnel de l'utilisateur réel.
+
+    Quand SysTeen est relancé via sudo (commande :#), Path.home()
+    peut valoir /root. On retrouve alors le vrai utilisateur grâce
+    à SUDO_USER, pour garder la même configuration de sécurité.
+    """
+
+    try:
+        if os.geteuid() == 0:
+            sudo_user = os.environ.get("SUDO_USER")
+
+            if sudo_user and sudo_user != "root":
+                return Path(pwd.getpwnam(sudo_user).pw_dir)
+
+    except Exception:
+        pass
+
+    return Path.home()
+
+
 class SafeMath:
     OPERATORS = {
         ast.Add: operator.add,
@@ -129,6 +158,7 @@ class SysTeen:
 
     def __init__(self, script_path=None):
         # Chemin du programme SysTeen lui-même (cible des mises à jour)
+        # Retrouvé automatiquement à partir de ce fichier.
         self.program_path = Path(__file__).resolve()
 
         # Chemin du README.md installé à côté du programme
@@ -140,8 +170,13 @@ class SysTeen:
 
         self.update_fingerprint = None
 
+        # Configuration persistante (toujours celle du vrai utilisateur)
+        self.config_dir = get_real_home() / ".config" / "systeen"
+        self.config_file = self.config_dir / "config.json"
+        self.registry_file = self.config_dir / "vars_registry.json"
+
         if script_path is None:
-            # Mode sans script : python systeen.py --maj
+            # Mode sans script : python systeen.py --maj / --change / ...
             self.script_path = None
             self.lines = []
             self.variables = {}
@@ -150,8 +185,6 @@ class SysTeen:
             self.finished = False
             self.loop_states = {}
             self.save_file = None
-            self.config_dir = Path.home() / ".config" / "systeen"
-            self.config_file = self.config_dir / "config.json"
             self.safety_enabled = True
             return
 
@@ -186,10 +219,6 @@ class SysTeen:
         self.loop_states = {}
 
         self.save_file = Path(str(self.script_path) + ".vars")
-
-        # Configuration persistante
-        self.config_dir = Path.home() / ".config" / "systeen"
-        self.config_file = self.config_dir / "config.json"
 
         self.safety_enabled = True
         self.update_fingerprint = None
@@ -307,6 +336,10 @@ class SysTeen:
         print(f"[SysTeen] Vérifiez le code de {filename} avant de le lancer.")
         print(f"[SysTeen] Souhaitez-vous lancer {filename} ? (Y/n)")
 
+        return self.ask_yes_no()
+
+    @staticmethod
+    def ask_yes_no():
         while True:
             answer = input("[SysTeen] > ").strip().lower()
 
@@ -329,9 +362,10 @@ class SysTeen:
             resolved = path.absolute()
 
         root = Path("/").resolve()
-        home = Path.home().resolve()
 
-        return resolved == root or resolved == home
+        homes = {Path.home().resolve(), get_real_home().resolve()}
+
+        return resolved == root or resolved in homes
 
     def check_destructive_path(self, path):
         """
@@ -374,6 +408,44 @@ class SysTeen:
                 "charger les variables sauvegardées."
             )
 
+    def read_vars_registry(self):
+        """Liste des fichiers .vars connus (pour --uninstall)."""
+
+        try:
+            data = json.loads(
+                self.registry_file.read_text(encoding="utf-8")
+            )
+
+            if isinstance(data, list):
+                return [item for item in data if isinstance(item, str)]
+
+        except Exception:
+            pass
+
+        return []
+
+    def register_vars_file(self):
+        """Mémorise l'emplacement du .vars pour pouvoir le supprimer."""
+
+        try:
+            entries = self.read_vars_registry()
+            entry = str(self.save_file)
+
+            if entry in entries:
+                return
+
+            self.ensure_config_directory()
+
+            entries.append(entry)
+
+            self.registry_file.write_text(
+                json.dumps(entries, ensure_ascii=False, indent=2),
+                encoding="utf-8"
+            )
+
+        except OSError:
+            pass
+
     def write_saved_variables(self):
         data = {}
 
@@ -386,6 +458,8 @@ class SysTeen:
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8"
             )
+
+            self.register_vars_file()
 
         else:
             try:
@@ -903,10 +977,10 @@ class SysTeen:
         self.delete_with_sudo(content)
 
     # =========================================================
-    # CREA
+    # ADD (ancien :crea)
     # =========================================================
 
-    def command_crea(self, content):
+    def command_add(self, content):
         name = self.interpolate(content.strip())
 
         if not name:
@@ -1079,6 +1153,158 @@ class SysTeen:
         subprocess.run(["pkill", "-x", program], check=False)
 
     # =========================================================
+    # GO : lancer un second script SysTeen en parallèle
+    # =========================================================
+
+    def command_go(self, content):
+        """
+        :go fichier.st
+            Fichier situé dans le même dossier que le script actuel.
+
+        :go /home/user/fichier.st
+            Chemin absolu (le ~ est aussi accepté).
+
+        Le second script tourne en parallèle dans un autre processus.
+        """
+
+        target = self.interpolate(content.strip())
+
+        if not target:
+            raise SysTeenError("Syntaxe : :go [fichier.st]")
+
+        path = Path(os.path.expanduser(target))
+
+        if not path.is_absolute():
+            path = self.script_path.parent / path
+
+        path = path.resolve()
+
+        if path.is_dir():
+            raise SysTeenError(
+                f"{path} est un dossier : indiquez un fichier .st."
+            )
+
+        if path.suffix != ".st":
+            raise SysTeenError(
+                "Le fichier lancé par :go doit avoir l'extension .st."
+            )
+
+        if not path.is_file():
+            raise SysTeenError(f"Fichier SysTeen introuvable : {path}")
+
+        if path == self.script_path:
+            raise SysTeenError(
+                "Un script ne peut pas se lancer lui-même avec :go."
+            )
+
+        try:
+            depth = int(os.environ.get("SYSTEEN_GO_DEPTH", "0"))
+        except ValueError:
+            depth = 0
+
+        if depth >= MAX_GO_DEPTH:
+            raise SysTeenError(
+                "Trop de scripts lancés les uns par les autres "
+                f"(limite : {MAX_GO_DEPTH})."
+            )
+
+        # Le script lancé n'a pas été relu par l'utilisateur :
+        # on garde donc la confirmation de sécurité de SysTeen.
+        print()
+        print(
+            f"[SysTeen] Le script va lancer {path.name} "
+            "en parallèle."
+        )
+        print(f"[SysTeen] Chemin : {path}")
+        print(
+            f"[SysTeen] Vérifiez le code de {path.name} avant. "
+            "Continuer ? (Y/n)"
+        )
+
+        if not self.ask_yes_no():
+            print("[SysTeen] :go annulé.")
+            return
+
+        env = os.environ.copy()
+        env["SYSTEEN_GO_DEPTH"] = str(depth + 1)
+
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(self.program_path),
+                str(path),
+                "--no-confirm",
+            ],
+            env=env
+        )
+
+        print(f"[SysTeen] {path.name} lancé en parallèle.")
+
+    # =========================================================
+    # :# (relance en root puis arrêt du script)
+    # =========================================================
+
+    def command_elevate(self):
+        """
+        1) cd vers le dossier où se trouve systeen.py
+        2) sudo python systeen.py <ce script>
+        3) le script actuel s'arrête (le processus est remplacé)
+
+        L'utilisateur n'a plus qu'à saisir le mot de passe root.
+        """
+
+        if os.geteuid() == 0:
+            print(
+                "[SysTeen] Vous êtes déjà root : :# ignoré."
+            )
+            return
+
+        if shutil.which("sudo") is None:
+            raise SysTeenError("sudo est introuvable sur ce système.")
+
+        previous_directory = Path.cwd()
+
+        # systeen.py est retrouvé automatiquement (__file__)
+        try:
+            os.chdir(self.program_path.parent)
+
+        except OSError as error:
+            raise SysTeenError(
+                f"Impossible d'aller dans {self.program_path.parent} : "
+                f"{error}"
+            )
+
+        # Les variables sauvegardées doivent être écrites avant l'arrêt
+        self.write_saved_variables()
+
+        command = [
+            "sudo",
+            sys.executable,
+            str(self.program_path),
+            str(self.script_path),
+            "--no-confirm",
+        ]
+
+        print(
+            "[SysTeen] Relance en root : "
+            f"cd {self.program_path.parent} && sudo python "
+            f"{self.program_path.name} {self.script_path}"
+        )
+
+        sys.stdout.flush()
+
+        try:
+            # Remplace le processus : le script actuel s'arrête ici
+            os.execvp("sudo", command)
+
+        except OSError as error:
+            os.chdir(previous_directory)
+
+            raise SysTeenError(
+                f"Impossible de lancer sudo : {error}"
+            )
+
+    # =========================================================
     # CD
     # =========================================================
 
@@ -1169,6 +1395,155 @@ class SysTeen:
             )
 
         print(text)
+
+    # =========================================================
+    # --change : modifier la protection de / et du HOME
+    # =========================================================
+
+    def command_change(self):
+        """
+        python systeen.py --change
+            Permet de revenir sur le choix de la sécurité.
+        """
+
+        self.load_security_config()
+
+        state = "OUI" if self.safety_enabled else "NON"
+
+        print(f"[SysTeen] Sécurité actuellement : {state}.")
+
+        self.ask_security_preference()
+
+    # =========================================================
+    # --uninstall : désinstallation complète
+    # =========================================================
+
+    def collect_uninstall_targets(self):
+        """
+        Retourne la liste des fichiers/dossiers à supprimer.
+
+        Le programme lui-même est toujours placé en dernier.
+        Les scripts .st de l'utilisateur ne sont jamais touchés,
+        ni aucun trousseau GPG : la clé SLNE n'existe que dans le
+        code de systeen.py (GPG est lancé dans un dossier temporaire).
+        """
+
+        program_dir = self.program_path.parent
+
+        candidates = []
+
+        # Fichiers .vars connus (registre) + ceux à côté du programme
+        for entry in self.read_vars_registry():
+            candidates.append(Path(entry))
+
+        try:
+            candidates.extend(program_dir.glob("*.st.vars"))
+        except OSError:
+            pass
+
+        # README et fichiers de mise à jour temporaires
+        candidates.append(self.readme_path)
+
+        candidates.append(
+            program_dir / ("." + self.program_path.name + ".update.new")
+        )
+
+        candidates.append(
+            program_dir / ("." + self.readme_path.name + ".update.new")
+        )
+
+        # Cache Python éventuel
+        try:
+            candidates.extend(
+                (program_dir / "__pycache__").glob(
+                    self.program_path.stem + ".*.pyc"
+                )
+            )
+        except OSError:
+            pass
+
+        # Dossiers temporaires de mise à jour restés sur le disque
+        try:
+            candidates.extend(
+                Path(tempfile.gettempdir()).glob("systeen-update-*")
+            )
+        except OSError:
+            pass
+
+        # Configuration (préférence de sécurité, registre)
+        candidates.append(self.config_dir)
+
+        targets = []
+        seen = set()
+
+        for candidate in candidates:
+            if str(candidate) in seen:
+                continue
+
+            seen.add(str(candidate))
+
+            if candidate.exists() or candidate.is_symlink():
+                targets.append(candidate)
+
+        # Le programme en dernier
+        targets.append(self.program_path)
+
+        return targets
+
+    def command_uninstall(self):
+        targets = self.collect_uninstall_targets()
+
+        print("[SysTeen] Désinstallation de SysTeen")
+        print("[SysTeen] Les éléments suivants seront supprimés :")
+
+        for target in targets:
+            suffix = "/" if target.is_dir() else ""
+
+            print(f"[SysTeen]   - {target}{suffix}")
+
+        print(
+            "[SysTeen] Vos scripts .st et la clé SLNE "
+            "(hors du code de systeen.py) ne sont pas touchés."
+        )
+        print()
+        print("[SysTeen] Pour confirmer, tapez exactement :")
+        print(f"[SysTeen] {UNINSTALL_PHRASE}")
+
+        answer = input("[SysTeen] > ").strip()
+
+        if answer != UNINSTALL_PHRASE:
+            print("[SysTeen] Phrase incorrecte : désinstallation annulée.")
+            return
+
+        errors = 0
+
+        for target in targets:
+            try:
+                if target.is_dir() and not target.is_symlink():
+                    shutil.rmtree(target)
+
+                else:
+                    target.unlink()
+
+            except FileNotFoundError:
+                continue
+
+            except Exception as error:
+                errors += 1
+
+                print(
+                    f"[SysTeen] Impossible de supprimer {target} : "
+                    f"{error}"
+                )
+
+        if errors:
+            print(
+                f"[SysTeen] Désinstallation terminée avec {errors} "
+                "erreur(s)."
+            )
+
+        else:
+            print("[SysTeen] SysTeen a été désinstallé. Au revoir !")
 
     # =========================================================
     # MISE A JOUR / VERSION
@@ -2075,6 +2450,10 @@ class SysTeen:
             self.command_stop(args)
             return
 
+        if name == "go":
+            self.command_go(args)
+            return
+
         raise SysTeenError(f"Commande inline inconnue : :{name}")
 
     def execute_jump_loop(self, line_index, target, count_text):
@@ -2205,6 +2584,12 @@ class SysTeen:
 
             raise SysTeenError("Commande systeen inconnue.")
 
+        # RELANCE EN ROOT (:#)
+        if command == "#":
+            self.command_elevate()
+
+            return line_index + 1
+
         # VERSION / MISE A JOUR
         if command == "v":
             self.command_version(args)
@@ -2255,6 +2640,11 @@ class SysTeen:
 
             return line_index + 1
 
+        if command == "go":
+            self.command_go(args)
+
+            return line_index + 1
+
         if command == "cd":
             self.command_cd(args)
 
@@ -2277,10 +2667,15 @@ class SysTeen:
             return line_index + 1
 
         # FICHIERS
-        if command == "crea":
-            self.command_crea(args)
+        if command == "add":
+            self.command_add(args)
 
             return line_index + 1
+
+        if command == "crea":
+            raise SysTeenError(
+                "La commande :crea a été renommée :add."
+            )
 
         if command == "edit":
             return self.command_edit(line_index, args) + 1
@@ -2449,9 +2844,40 @@ def print_usage():
     print("  python systeen.py --maj           Mettre à jour vers la dernière version")
     print("  python systeen.py --maj 0.4.2     Installer une version précise (rollback)")
     print("  python systeen.py --update        Alias de --maj")
+    print("  python systeen.py --change        Modifier la protection de / et du dossier personnel")
+    print("  python systeen.py --uninstall     Désinstaller SysTeen")
     print("  python systeen.py --readme        Afficher le README.md")
     print("  python systeen.py --version       Afficher la version installée")
     print("  python systeen.py --help          Afficher cette aide")
+
+
+def run_simple_mode(arguments, action):
+    """
+    Modes sans script ni argument : --readme, --change, --uninstall.
+    `action` reçoit l'objet SysTeen.
+    """
+
+    if arguments:
+        print_usage()
+        sys.exit(1)
+
+    systeen = SysTeen(None)
+
+    try:
+        action(systeen)
+
+    except SysTeenError as error:
+        print(f"[SysTeen] Erreur : {error}")
+        sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n[SysTeen] Arrêt.")
+        sys.exit(130)
+
+    except Exception as error:
+        print(f"[SysTeen] Erreur inattendue : {error}")
+        sys.exit(1)
+
 
 def run_update_mode(arguments):
     """
@@ -2483,36 +2909,16 @@ def run_update_mode(arguments):
         sys.exit(1)
 
 
-def run_readme_mode(arguments):
-    """
-    python systeen.py --readme
-    """
-
-    if arguments:
-        print_usage()
-        sys.exit(1)
-
-    systeen = SysTeen(None)
-
-    try:
-        systeen.command_readme()
-
-    except SysTeenError as error:
-        print(f"[SysTeen] Erreur : {error}")
-        sys.exit(1)
-
-    except KeyboardInterrupt:
-        print("\n[SysTeen] Arrêt.")
-        sys.exit(130)
-
-    except Exception as error:
-        print(f"[SysTeen] Erreur inattendue : {error}")
-        sys.exit(1)
-
-
 def main():
 
     arguments = sys.argv[1:]
+
+    # Option interne (non documentée) : utilisée par :go et :#
+    # pour ne pas redemander la confirmation de lancement.
+    no_confirm = "--no-confirm" in arguments
+
+    if no_confirm:
+        arguments = [a for a in arguments if a != "--no-confirm"]
 
     if arguments and arguments[0] in ("--help", "-h"):
         print_usage()
@@ -2527,7 +2933,15 @@ def main():
         sys.exit(0)
 
     if arguments and arguments[0] == "--readme":
-        run_readme_mode(arguments[1:])
+        run_simple_mode(arguments[1:], lambda s: s.command_readme())
+        sys.exit(0)
+
+    if arguments and arguments[0] == "--change":
+        run_simple_mode(arguments[1:], lambda s: s.command_change())
+        sys.exit(0)
+
+    if arguments and arguments[0] == "--uninstall":
+        run_simple_mode(arguments[1:], lambda s: s.command_uninstall())
         sys.exit(0)
 
     if len(arguments) != 1:
@@ -2536,18 +2950,42 @@ def main():
 
         sys.exit(1)
 
+    target = arguments[0]
+
+    # Option inconnue (ex. --truc)
+    if target.startswith("-"):
+        print(f"[SysTeen] Erreur : option inconnue '{target}'.")
+        print(
+            "[SysTeen] Pour obtenir de l'aide, tapez : "
+            "python systeen.py --help"
+        )
+        sys.exit(1)
+
+    # Fichier inexistant
+    if not Path(os.path.expanduser(target)).exists():
+        print(
+            f"[SysTeen] Erreur : il n'y a aucun fichier "
+            f"ou dossier nommé '{target}'."
+        )
+        print(
+            "[SysTeen] Si vous voulez de l'aide, tapez : "
+            "python systeen.py --help"
+        )
+        sys.exit(1)
+
     try:
 
-        systeen = SysTeen(arguments[0])
+        systeen = SysTeen(os.path.expanduser(target))
 
         # Chargement de la préférence de sécurité
         config_exists = systeen.load_security_config()
 
-        if not config_exists:
+        if not config_exists and not no_confirm:
             systeen.ask_security_preference()
 
         # Confirmation du lancement
-        if not systeen.confirm_script_launch():
+        # (sautée pour :go et :#, déjà confirmés par l'utilisateur)
+        if not no_confirm and not systeen.confirm_script_launch():
 
             print("[SysTeen] Exécution annulée.")
 
