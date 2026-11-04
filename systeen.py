@@ -21,13 +21,22 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 
 # Phrase à taper pour confirmer la désinstallation
-UNINSTALL_PHRASE = "iwantuninstallsysteenandthesysteenprojet"
+UNINSTALL_PHRASE = (
+    "iwanttouninstallnowthesysteenexecutable"
+    "thesysteenpackageandthesysteenproject"
+)
 
 # Profondeur maximale de scripts lancés les uns par les autres avec :go
 MAX_GO_DEPTH = 5
+
+# Emplacement de la commande `systeen` (lien vers systeen.py)
+BIN_LINK_PATH = Path("/usr/local/bin/systeen")
+
+# Nombre maximal de conseils d'indentation affichés au lancement
+MAX_INDENT_WARNINGS = 10
 
 # Terminaux graphiques pris en charge par :go, dans l'ordre d'essai.
 # Chaque entrée construit les arguments qui suivent le nom du terminal
@@ -923,6 +932,108 @@ class SysTeen:
         raise SysTeenError(":if sans :elsend.")
 
     # =========================================================
+    # INDENTATION DES :if (conseil, jamais bloquant)
+    # =========================================================
+
+    def check_if_indentation(self):
+        """
+        Vérifie la présentation conseillée : 1 espace de plus par
+        niveau de :if.
+
+            :if condition
+             :commande
+             :else
+             :commande
+             :if autre_condition
+              :commande
+             :elsend
+            :elsend
+
+        Retourne une liste de conseils (vide si tout est bien
+        présenté). L'exécution du script n'est jamais bloquée.
+        """
+
+        messages = []
+        depth = 0
+        index = 0
+
+        while index < len(self.lines):
+            raw = self.lines[index]
+            stripped = raw.strip()
+
+            if not stripped.startswith(":"):
+                index += 1
+                continue
+
+            command_line = stripped[1:].strip()
+
+            if not command_line:
+                index += 1
+                continue
+
+            parts = command_line.split(maxsplit=1)
+            command = parts[0]
+            number = index + 1
+            indent = len(raw) - len(raw.lstrip())
+
+            if command == "if":
+                expected = {depth}
+                depth += 1
+
+            elif command == "else":
+                if depth == 0:
+                    messages.append(
+                        f"ligne {number} : :else sans :if."
+                    )
+                expected = {max(depth - 1, 0), depth}
+
+            elif command == "elsend":
+                if depth == 0:
+                    messages.append(
+                        f"ligne {number} : :elsend sans :if."
+                    )
+                else:
+                    depth -= 1
+
+                expected = {depth}
+
+            else:
+                expected = {depth}
+
+            if indent not in expected:
+                wanted = " ou ".join(
+                    str(value) for value in sorted(expected)
+                )
+
+                messages.append(
+                    f"ligne {number} : {wanted} espace(s) de "
+                    f"décalage conseillé(s), {indent} trouvé(s)."
+                )
+
+            # Un :edit sur plusieurs lignes : le texte entre
+            # guillemets n'est pas du code SysTeen.
+            if command == "edit":
+                try:
+                    _, last_line = self.find_edit_text(
+                        index,
+                        parts[1] if len(parts) > 1 else ""
+                    )
+
+                    index = last_line
+
+                except SysTeenError:
+                    pass
+
+            index += 1
+
+        if depth > 0:
+            messages.append(
+                f"il manque {depth} :elsend pour fermer les :if."
+            )
+
+        return messages
+
+    # =========================================================
     # CHEMINS
     # =========================================================
 
@@ -1109,6 +1220,52 @@ class SysTeen:
         answer = input(self.interpolate(question) + " ")
 
         self.variables[variable] = answer
+
+    # =========================================================
+    # SAYN? / SAYN? : question à réponse y ou n uniquement
+    # =========================================================
+
+    def command_say_yes_no(self, content, default_yes):
+        """
+        :sayn? question ; variable   -> (Y/n) : Entrée = y
+        :sayN? question ; variable   -> (y/N) : Entrée = n
+
+        Seules les réponses y ou n sont acceptées (majuscules
+        tolérées). La variable reçoit "y" ou "n".
+        """
+
+        name = ":sayn?" if default_yes else ":sayN?"
+
+        if ";" not in content:
+            raise SysTeenError(
+                f"Syntaxe : {name} [question] ; [variable]"
+            )
+
+        question, variable = content.rsplit(";", 1)
+
+        question = question.strip()
+        variable = variable.strip()
+
+        self.require_variable(variable)
+
+        hint = "(Y/n)" if default_yes else "(y/N)"
+
+        prompt = f"{self.interpolate(question)} {hint} "
+
+        while True:
+            answer = input(prompt).strip().lower()
+
+            if answer == "":
+                value = "y" if default_yes else "n"
+                break
+
+            if answer in ("y", "n"):
+                value = answer
+                break
+
+            print("[SysTeen] Réponse invalide. Répondez y ou n.")
+
+        self.variables[variable] = value
 
     # =========================================================
     # MATH
@@ -1299,7 +1456,7 @@ class SysTeen:
         Le second script s'exécute dans une NOUVELLE FENÊTRE de
         terminal, visible et indépendante, avec son propre clavier.
         La fenêtre attend une touche à la fin pour laisser lire
-        les messages.
+        les messages. Aucune nouvelle confirmation n'est demandée.
         """
 
         target = self.interpolate(content.strip())
@@ -1343,23 +1500,8 @@ class SysTeen:
                 f"(limite : {MAX_GO_DEPTH})."
             )
 
-        # Le script lancé n'a pas été relu par l'utilisateur :
-        # on garde donc la confirmation de sécurité de SysTeen.
-        print()
-        print(
-            f"[SysTeen] Le script va lancer {path.name} "
-            "dans une nouvelle fenêtre."
-        )
-        print(f"[SysTeen] Chemin : {path}")
-        print(
-            f"[SysTeen] Vérifiez le code de {path.name} avant. "
-            "Continuer ? (Y/n)"
-        )
-
-        if not self.ask_yes_no():
-            print("[SysTeen] :go annulé.")
-            return
-
+        # Pas de nouvelle confirmation : l'avertissement Y/n a déjà
+        # été accepté au lancement du script d'origine.
         env = os.environ.copy()
         env["SYSTEEN_GO_DEPTH"] = str(depth + 1)
 
@@ -1557,6 +1699,147 @@ class SysTeen:
         self.ask_security_preference()
 
     # =========================================================
+    # --install : commande "systeen" dans /usr/local/bin
+    # =========================================================
+
+    def bin_link_points_here(self):
+        """Vrai si /usr/local/bin/systeen est un lien vers ce systeen.py."""
+
+        try:
+            return (
+                BIN_LINK_PATH.is_symlink()
+                and BIN_LINK_PATH.resolve() == self.program_path
+            )
+
+        except OSError:
+            return False
+
+    @staticmethod
+    def run_privileged(command, error_message):
+        """Exécute une commande directement si on est root, sinon via sudo."""
+
+        if os.geteuid() != 0:
+            if shutil.which("sudo") is None:
+                raise SysTeenError(
+                    "sudo est introuvable. Relancez cette commande "
+                    "en root."
+                )
+
+            command = ["sudo"] + command
+
+        result = subprocess.run(command)
+
+        if result.returncode != 0:
+            raise SysTeenError(error_message)
+
+    def command_install(self):
+        """
+        python systeen.py --install
+            Crée le lien /usr/local/bin/systeen -> systeen.py
+            (systeen.py reste où il est).
+
+            Ensuite : systeen mon_script.st / systeen --help ...
+            Fonctionne dans tous les shells, sous sudo et dans les
+            scripts. Il suffit de relancer --install si systeen.py
+            est déplacé.
+        """
+
+        link = BIN_LINK_PATH
+
+        # systeen.py doit être exécutable (shebang : python3)
+        try:
+            mode = self.program_path.stat().st_mode
+
+            os.chmod(
+                self.program_path,
+                mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            )
+
+        except OSError as error:
+            raise SysTeenError(
+                f"Impossible de rendre {self.program_path} "
+                f"exécutable : {error}"
+            )
+
+        if self.bin_link_points_here():
+            print(
+                f"[SysTeen] La commande 'systeen' est déjà "
+                f"installée ({link})."
+            )
+            return
+
+        if link.is_symlink():
+            print(
+                f"[SysTeen] {link} existe déjà et pointe vers :"
+            )
+            print(f"[SysTeen]   {os.readlink(link)}")
+            print("[SysTeen] Le remplacer par ce systeen.py ? (Y/n)")
+
+            if not self.ask_yes_no():
+                print("[SysTeen] Aucune modification.")
+                return
+
+        elif link.exists():
+            raise SysTeenError(
+                f"{link} existe déjà et n'est pas un lien SysTeen : "
+                "je ne l'écrase pas."
+            )
+
+        if not link.parent.is_dir():
+            self.run_privileged(
+                ["mkdir", "-p", str(link.parent)],
+                f"Impossible de créer {link.parent}."
+            )
+
+        if os.geteuid() != 0:
+            print(
+                f"[SysTeen] Écriture dans {link.parent} : "
+                "le mot de passe sudo peut être demandé."
+            )
+
+        self.run_privileged(
+            ["ln", "-sfn", str(self.program_path), str(link)],
+            f"Impossible de créer le lien {link}."
+        )
+
+        if not self.bin_link_points_here():
+            raise SysTeenError(
+                f"Le lien {link} n'a pas pu être vérifié."
+            )
+
+        print(f"[SysTeen] Commande installée : {link}")
+        print(f"[SysTeen]   -> {self.program_path}")
+
+        path_dirs = os.environ.get("PATH", "").split(":")
+
+        if str(link.parent) not in path_dirs:
+            print(
+                f"[SysTeen] Attention : {link.parent} n'est pas "
+                "dans votre PATH."
+            )
+
+        print()
+        print("[SysTeen] Essayez : systeen --help")
+        print("[SysTeen]           systeen mon_script.st")
+
+    def remove_bin_link(self):
+        """Retire /usr/local/bin/systeen s'il pointe vers ce programme."""
+
+        if not self.bin_link_points_here():
+            return False
+
+        try:
+            BIN_LINK_PATH.unlink()
+
+        except PermissionError:
+            self.run_privileged(
+                ["rm", "-f", str(BIN_LINK_PATH)],
+                f"Impossible de supprimer {BIN_LINK_PATH}."
+            )
+
+        return True
+
+    # =========================================================
     # --uninstall : désinstallation complète
     # =========================================================
 
@@ -1643,6 +1926,11 @@ class SysTeen:
 
             print(f"[SysTeen]   - {target}{suffix}")
 
+        has_link = self.bin_link_points_here()
+
+        if has_link:
+            print(f"[SysTeen]   - {BIN_LINK_PATH} (commande systeen)")
+
         print(
             "[SysTeen] Vos scripts .st et la clé SLNE "
             "(hors du code de systeen.py) ne sont pas touchés."
@@ -1677,6 +1965,15 @@ class SysTeen:
                     f"[SysTeen] Impossible de supprimer {target} : "
                     f"{error}"
                 )
+
+        if has_link:
+            try:
+                self.remove_bin_link()
+
+            except SysTeenError as error:
+                errors += 1
+
+                print(f"[SysTeen] {error}")
 
         if errors:
             print(
@@ -2765,6 +3062,16 @@ class SysTeen:
 
             return line_index + 1
 
+        if command == "sayn?":
+            self.command_say_yes_no(args, default_yes=True)
+
+            return line_index + 1
+
+        if command == "sayN?":
+            self.command_say_yes_no(args, default_yes=False)
+
+            return line_index + 1
+
         # MATH
         if command == "math":
             self.command_math(args)
@@ -2992,6 +3299,7 @@ def print_usage():
     print("  python systeen.py --maj 0.4.2     Installer une version précise (rollback)")
     print("  python systeen.py --update        Alias de --maj")
     print("  python systeen.py --change        Modifier la protection de / et du dossier personnel")
+    print("  python systeen.py --install       Installer la commande 'systeen' (/usr/local/bin)")
     print("  python systeen.py --uninstall     Désinstaller SysTeen")
     print("  python systeen.py --readme        Afficher le README.md")
     print("  python systeen.py --version       Afficher la version installée")
@@ -3079,6 +3387,14 @@ def main():
 
     arguments = sys.argv[1:]
 
+    # Nom à afficher dans les messages d'aide : "systeen" si lancé
+    # par la commande installée avec --install
+    invoked = (
+        "systeen"
+        if Path(sys.argv[0]).name == "systeen"
+        else "python systeen.py"
+    )
+
     # Options internes (non documentées) :
     #   --no-confirm : utilisée par :go et :# pour ne pas redemander
     #                  la confirmation de lancement.
@@ -3112,6 +3428,10 @@ def main():
         run_simple_mode(arguments[1:], lambda s: s.command_change())
         sys.exit(0)
 
+    if arguments and arguments[0] == "--install":
+        run_simple_mode(arguments[1:], lambda s: s.command_install())
+        sys.exit(0)
+
     if arguments and arguments[0] == "--uninstall":
         run_simple_mode(arguments[1:], lambda s: s.command_uninstall())
         sys.exit(0)
@@ -3129,7 +3449,7 @@ def main():
         print(f"[SysTeen] Erreur : option inconnue '{target}'.")
         print(
             "[SysTeen] Pour obtenir de l'aide, tapez : "
-            "python systeen.py --help"
+            f"{invoked} --help"
         )
         sys.exit(1)
 
@@ -3141,7 +3461,7 @@ def main():
         )
         print(
             "[SysTeen] Si vous voulez de l'aide, tapez : "
-            "python systeen.py --help"
+            f"{invoked} --help"
         )
 
         if window_mode:
@@ -3169,6 +3489,26 @@ def main():
             print("[SysTeen] Exécution annulée.")
 
             sys.exit(0)
+
+        # Conseil de présentation des :if (non bloquant)
+        indent_warnings = systeen.check_if_indentation()
+
+        if indent_warnings:
+            print()
+            print(
+                "[SysTeen] Conseil : décalez d'un espace chaque "
+                "niveau de :if."
+            )
+
+            for message in indent_warnings[:MAX_INDENT_WARNINGS]:
+                print(f"[SysTeen]   {message}")
+
+            hidden = len(indent_warnings) - MAX_INDENT_WARNINGS
+
+            if hidden > 0:
+                print(f"[SysTeen]   ... et {hidden} autre(s).")
+
+            print()
 
         if window_mode:
             print(
