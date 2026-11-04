@@ -3,7 +3,7 @@
 **SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
 Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-> Version actuelle : **0.7.2**
+> Version actuelle : **0.8.0**
 > Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
@@ -18,9 +18,10 @@ Il sert à automatiser des tâches système : fichiers, variables, commandes Lin
 6. [Variables](#variables)
 7. [Conditions](#conditions)
 8. [Boucles](#boucles)
-9. [Mises à jour](#mises-à-jour)
-10. [Désinstallation](#désinstallation)
-11. [Notes de version](#notes-de-version)
+9. [Vérifier un script](#vérifier-un-script---check)
+10. [Mises à jour](#mises-à-jour)
+11. [Désinstallation](#désinstallation)
+12. [Notes de version](#notes-de-version)
 
 ---
 
@@ -97,6 +98,7 @@ Avant chaque lancement, SysTeen rappelle l'état de la sécurité et demande con
 | `python systeen.py --maj` | Met à jour vers la dernière version |
 | `python systeen.py --maj 0.6.0` | Installe une version précise (rollback) |
 | `python systeen.py --update` | Alias de `--maj` |
+| `python systeen.py --check fichier.st` | Vérifie un script **sans l'exécuter** (voir [Vérifier un script](#vérifier-un-script---check)) |
 | `python systeen.py --install` | Installe la commande `systeen` dans `/usr/local/bin` |
 | `python systeen.py --change` | Modifie le choix de la protection de `/` et du dossier personnel |
 | `python systeen.py --uninstall` | Désinstalle SysTeen |
@@ -120,7 +122,7 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 
 ### À savoir
 
-- La protection ne concerne **que** `:del`, `:del!` et `:rmf`. Elle ne filtre **pas** ce que fait `:cmd`, qui exécute une commande shell telle quelle.
+- La protection concerne `:del`, `:del!` et `:rmf`. Pour `:cmd`, elle bloque aussi les `rm -r` évidents visant `/` ou votre dossier personnel (`rm -rf /`, `rm -rf ~`, `rm -rf /*`, `--no-preserve-root`…). Ce n'est **pas** une protection parfaite : une commande déguisée (script, `bash -c`, `find -delete`…) passe à travers.
 - `:go` ne redemande **pas** de confirmation : l'avertissement `Y/n` accepté au lancement du premier script vaut pour les scripts qu'il lance. Relisez donc aussi les scripts appelés par `:go`.
 - Sous `sudo` (commande `:#`), SysTeen retrouve le vrai utilisateur grâce à `SUDO_USER` pour garder **sa** configuration de sécurité et **son** dossier personnel.
 - Ne lancez jamais un script `.st` dont vous ne comprenez pas le contenu.
@@ -163,6 +165,10 @@ L'expression est évaluée de façon sûre : aucun code Python arbitraire n'est 
 |---|---|
 | `:add nom` | Crée un fichier si `nom` a une extension (`notes.txt`), sinon un dossier. Crée aussi les dossiers parents. Erreur si l'élément existe déjà |
 | `:edit fichier "texte"` | Écrit le texte dans le fichier (écrase le contenu). Le texte peut s'étendre sur plusieurs lignes, jusqu'au guillemet fermant |
+| `:edit +fichier "texte"` | Ajoute le texte **à la fin** du fichier (le crée s'il n'existe pas) |
+| `:read fichier ; variable` | Lit un fichier texte dans une variable **déjà créée** (le retour à la ligne final est retiré, 10 Mo maximum) |
+| `:copy chemin` | Mémorise un fichier ou un dossier (comme « copier ») |
+| `:paste destination` | Colle l'élément mémorisé par `:copy` (comme « coller ») |
 | `:del chemin` | Supprime un fichier ou un dossier |
 | `:del! chemin` | Comme `:del`, avec une nouvelle tentative via `sudo` si l'accès est refusé |
 | `:rmf chemin` | Supprime directement avec `sudo rm -rf` |
@@ -179,16 +185,41 @@ Ligne 3"
 > Le texte d'un `:edit` ne peut pas contenir de guillemet `"`.
 > L'ancienne commande `:crea` a été renommée `:add`.
 
+Exemple de `:copy` / `:paste` :
+
+```
+:copy rapport.txt
+:paste sauvegardes/            # dossier : collé dedans, même nom
+:paste rapport_v2.txt          # sinon : nouveau nom complet
+```
+
+- Si la destination est un dossier existant (ou se termine par `/`), l'élément est collé **dedans** avec son nom d'origine. Sinon la destination est le nouveau chemin complet.
+- Un même `:copy` peut être collé plusieurs fois.
+- Rien n'est jamais écrasé : si la destination existe, c'est une erreur.
+- Les dossiers sont copiés avec tout leur contenu (mais pas dans eux-mêmes).
+
 ### Programmes et système
 
 | Commande | Description |
 |---|---|
 | `:cmd commande` | Exécute une commande Linux dans le terminal |
+| `:cmd commande ; variable` | Exécute la commande et met son **résultat** dans une variable **déjà créée** (le retour à la ligne final est retiré) |
+| `:pause` / `:pause message` | Attend que l'utilisateur appuie sur Entrée |
 | `:run programme` | Lance un programme en arrière-plan |
 | `:stop programme` | Arrête un programme par son nom (`pkill -x`) |
 | `:wait nombre unité` | Pause. Unités : `sec`, `min`, `h`, `j`, `y` |
 | `:re` | Redémarre l'ordinateur |
 | `:off` | Éteint l'ordinateur |
+
+Exemple de capture :
+
+```
+:var add nom
+:cmd whoami ; nom
+:say Connecté en tant que $nom
+```
+
+Si ce qui suit le `;` est un programme ou une commande du shell (`:cmd echo a ; ls`), la ligne reste une commande shell normale. Si c'est un mot inconnu (variable oubliée), SysTeen affiche `Variable-404`.
 
 ### `:go` : lancer un second script dans une nouvelle fenêtre
 
@@ -256,6 +287,7 @@ Il ne reste plus qu'à saisir le mot de passe root.
 
 On utilise une variable avec `$` : `:say Bonjour $nom`.
 Un nom de variable peut contenir lettres, chiffres, `_` et `.`.
+Comme le point fait partie du nom, `$nom.txt` cherche la variable `nom.txt` : écrivez **`${nom}.txt`** pour délimiter le nom.
 Utiliser une variable qui n'existe pas affiche une erreur `Variable-404`.
 
 Les variables sauvegardées sont stockées à côté du script, dans `monscript.st.vars`, et rechargées automatiquement.
@@ -281,6 +313,9 @@ Les variables sauvegardées sont stockées à côté du script, dans `monscript.
 | `$sys.home` | Dossier personnel |
 | `$sys.shell` | Shell de l'utilisateur |
 | `$sys.python` | Version de Python |
+| `$sys.version` | Version de SysTeen |
+| `$sys.date` | Date du jour (`AAAA-MM-JJ`) |
+| `$sys.time` | Heure (`HH:MM:SS`) |
 
 ---
 
@@ -293,6 +328,20 @@ Les variables sauvegardées sont stockées à côté du script, dans `monscript.
  :say Mineur
 :elsend
 ```
+
+### Combiner des conditions : `and` / `or`
+
+```
+:if $age >= 18 and $pays == FR
+ :say Majeur en France
+:elsend
+
+:if $a == 1 or exist fichier.txt
+ :say a vaut 1, ou le fichier existe
+:elsend
+```
+
+`and` passe avant `or`. Un `and`/`or` n'est reconnu que s'il est suivi d'une vraie condition (`$variable`, `exist`, `empty`, `notempty`) : `:if $texte contains rock and roll` fonctionne donc comme avant.
 
 ### Présentation conseillée : 1 espace de plus par niveau
 
@@ -311,7 +360,7 @@ Pour se repérer facilement, décalez d'un espace tout ce qui se trouve dans un 
 :elsend
 ```
 
-Au lancement, SysTeen signale les lignes mal décalées (ou un `:elsend` oublié) avec leur numéro. Ce n'est qu'un **conseil** : le script s'exécute normalement.
+Au lancement, SysTeen signale les lignes mal décalées (ou un `:elsend` / `:loopend` oublié) avec leur numéro. Ce n'est qu'un **conseil** : le script s'exécute normalement. La même présentation s'applique aux boucles en bloc.
 
 Chaque `:if` doit se terminer par un `:elsend`. Le `:else` est facultatif. Les `:if` peuvent être imbriqués.
 
@@ -342,7 +391,23 @@ Chaque `:if` doit se terminer par un `:elsend`. Le `:else` est facultatif. Les `
 :loop inf :say Ça tourne...
 ```
 
-Commandes acceptées dans une boucle : `:say`, `:cmd`, `:math`, `:wait`, `:run`, `:stop`, `:go`.
+Commandes acceptées dans cette forme : `:say`, `:cmd`, `:math`, `:wait`, `:run`, `:stop`, `:go`.
+
+### Répéter plusieurs lignes : `:loop N` ... `:loopend`
+
+```
+:loop 3
+ :say Début du tour
+ :loop 2
+  :say  petit tour
+ :loopend
+:loopend
+```
+
+- `:loop 5` répète le bloc 5 fois, `:loop inf` à l'infini (sortez avec `:systeen end` dans un `:if`, ou `Ctrl + C`).
+- `:loop 0` saute le bloc.
+- Les boucles peuvent être imbriquées et contenir des `:if` (et inversement).
+- Indentez le contenu d'un espace par niveau, comme pour les `:if`.
 
 ### Sauter vers une ligne
 
@@ -353,6 +418,25 @@ Commandes acceptées dans une boucle : `:say`, `:cmd`, `:math`, `:wait`, `:run`,
 Retourne à la **ligne 5**, **3 fois** (`:loop L5-inf` pour l'infini).
 
 Arrêtez un script à tout moment avec `Ctrl + C`.
+
+---
+
+## Vérifier un script : `--check`
+
+```bash
+systeen --check mon_script.st
+```
+
+SysTeen analyse le script **sans rien exécuter** et signale :
+
+- les commandes inconnues et les arguments manquants ;
+- les `:if` / `:loop` mal fermés (`:elsend` ou `:loopend` oublié ou en trop) ;
+- les variables utilisées avant d'être créées (`:var add`), et `$sys.…` sans `:var sys` ;
+- les fichiers de `:go` introuvables ;
+- une syntaxe invalide pour `:wait`, `:loop`, `:say?`, `:read`… ;
+- en simple conseil : l'indentation, et l'absence de `:systeen end` (le script recommence alors depuis la première ligne quand il arrive à la fin).
+
+Le code de retour est `1` s'il y a des erreurs, `0` sinon. L'analyse est statique : elle suit l'ordre des lignes, sans exécuter les `:if` ni les boucles, donc une variable créée dans une branche est considérée comme créée.
 
 ---
 
@@ -424,6 +508,21 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 ---
 
 ## Notes de version
+
+### 0.8.0
+
+- **`:cmd commande ; variable`** : met le résultat de la commande dans une variable existante.
+- **`:read fichier ; variable`** : lit un fichier dans une variable. **`:edit +fichier "texte"`** ajoute à la fin d'un fichier.
+- **`:copy`** et **`:paste`** : copier un fichier ou un dossier, puis le coller (sans jamais écraser).
+- **Boucles en bloc** : `:loop N` ... `:loopend` (imbriquables, `inf` possible).
+- **`and` / `or`** dans les conditions.
+- **`${nom}`** pour délimiter un nom de variable (`${nom}.txt`).
+- **`$sys.version`**, **`$sys.date`**, **`$sys.time`**.
+- **`:pause`** : attend la touche Entrée.
+- **`--check`** : vérifie un script sans l'exécuter.
+- Les erreurs indiquent maintenant le **numéro de ligne**.
+- **Sécurité de `:cmd`** : les `rm -r` évidents sur `/` ou le dossier personnel sont bloqués quand la protection est active.
+- Correction : la limite de profondeur de `:go` n'était plus transmise après un `:#` (sudo réinitialise l'environnement).
 
 ### 0.7.2
 
