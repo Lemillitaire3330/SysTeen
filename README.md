@@ -3,7 +3,7 @@
 **SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
 Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-> Version actuelle : **0.7.1**
+> Version actuelle : **0.7.2**
 > Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
@@ -39,6 +39,20 @@ Placez `systeen.py` dans un dossier de votre choix, puis :
 ```bash
 python systeen.py --help
 ```
+
+### La commande `systeen`
+
+Pour taper simplement `systeen mon_script.st` ou `systeen --help` depuis n'importe où :
+
+```bash
+python systeen.py --install
+```
+
+Cela crée un lien `/usr/local/bin/systeen` vers `systeen.py`, qui **reste où il est** (le mot de passe `sudo` peut être demandé). Ça fonctionne dans tous les shells, sous `sudo` et dans les scripts.
+
+- Si vous déplacez `systeen.py`, relancez simplement `--install`.
+- SysTeen n'écrase jamais un fichier `systeen` qui ne vient pas de lui.
+- `--uninstall` retire aussi ce lien.
 
 ---
 
@@ -83,6 +97,7 @@ Avant chaque lancement, SysTeen rappelle l'état de la sécurité et demande con
 | `python systeen.py --maj` | Met à jour vers la dernière version |
 | `python systeen.py --maj 0.6.0` | Installe une version précise (rollback) |
 | `python systeen.py --update` | Alias de `--maj` |
+| `python systeen.py --install` | Installe la commande `systeen` dans `/usr/local/bin` |
 | `python systeen.py --change` | Modifie le choix de la protection de `/` et du dossier personnel |
 | `python systeen.py --uninstall` | Désinstalle SysTeen |
 | `python systeen.py --readme` | Affiche ce README (celui installé à côté de `systeen.py`) |
@@ -106,7 +121,7 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 ### À savoir
 
 - La protection ne concerne **que** `:del`, `:del!` et `:rmf`. Elle ne filtre **pas** ce que fait `:cmd`, qui exécute une commande shell telle quelle.
-- `:go` demande une confirmation avant de lancer un second script, car celui-ci n'a pas été relu.
+- `:go` ne redemande **pas** de confirmation : l'avertissement `Y/n` accepté au lancement du premier script vaut pour les scripts qu'il lance. Relisez donc aussi les scripts appelés par `:go`.
 - Sous `sudo` (commande `:#`), SysTeen retrouve le vrai utilisateur grâce à `SUDO_USER` pour garder **sa** configuration de sécurité et **son** dossier personnel.
 - Ne lancez jamais un script `.st` dont vous ne comprenez pas le contenu.
 
@@ -127,6 +142,10 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 |---|---|
 | `:say texte` | Affiche un texte (les `$variables` sont remplacées) |
 | `:say? question ; variable` | Pose une question et stocke la réponse dans une variable **déjà créée** |
+| `:sayn? question ; variable` | Question à réponse `y` ou `n` uniquement, affichée `(Y/n)` : **Entrée = y** |
+| `:sayN? question ; variable` | Pareil, affichée `(y/N)` : **Entrée = n** (choix recommandé pour les actions risquées) |
+
+Avec `:sayn?` et `:sayN?`, la variable reçoit `y` ou `n`, ce qui se teste avec `:if $variable == y`. Toute autre réponse est refusée et la question est reposée.
 
 ### Calcul
 
@@ -186,7 +205,7 @@ Ligne 3"
 - Le fichier doit exister et avoir l'extension `.st`.
 - Un script ne peut pas se relancer lui-même avec `:go`.
 - Les scripts lancés les uns par les autres sont limités à **5 niveaux**.
-- Une confirmation `Y/n` est demandée dans le terminal d'origine avant le lancement.
+- Aucune nouvelle confirmation n'est demandée : l'avertissement `Y/n` du premier script suffit.
 
 Terminaux pris en charge, essayés dans cet ordre : `xdg-terminal-exec`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `mate-terminal`, `lxterminal`, `qterminal`, `tilix`, `terminator`, `alacritty`, `kitty`, `wezterm`, `foot`, `xterm`, `x-terminal-emulator`.
 Si la variable d'environnement `TERMINAL` désigne l'un d'eux, il passe en premier.
@@ -269,11 +288,30 @@ Les variables sauvegardées sont stockées à côté du script, dans `monscript.
 
 ```
 :if $age >= 18
-:say Majeur
+ :say Majeur
 :else
-:say Mineur
+ :say Mineur
 :elsend
 ```
+
+### Présentation conseillée : 1 espace de plus par niveau
+
+Pour se repérer facilement, décalez d'un espace tout ce qui se trouve dans un `:if`, et encore d'un espace pour chaque `:if` imbriqué. Le `:elsend` se place au niveau de son `:if`.
+
+```
+:if $a == 1
+ :say a vaut 1
+ :if $b == 2
+  :say et b vaut 2
+ :else
+  :say mais b ne vaut pas 2
+ :elsend
+:else
+ :say a ne vaut pas 1
+:elsend
+```
+
+Au lancement, SysTeen signale les lignes mal décalées (ou un `:elsend` oublié) avec leur numéro. Ce n'est qu'un **conseil** : le script s'exécute normalement.
 
 Chaque `:if` doit se terminer par un `:elsend`. Le `:else` est facultatif. Les `:if` peuvent être imbriqués.
 
@@ -370,12 +408,13 @@ python systeen.py --uninstall
 SysTeen affiche la liste de ce qui sera supprimé, puis demande de taper exactement :
 
 ```
-iwantuninstallsysteenandthesysteenprojet
+iwanttouninstallnowthesysteenexecutablethesysteenpackageandthesysteenproject
 ```
 
 Éléments supprimés :
 
 - `systeen.py` et `README.md` ;
+- la commande `systeen` (`/usr/local/bin/systeen`) si elle a été installée avec `--install` ;
 - les fichiers `.vars` créés par vos scripts ;
 - la configuration (`~/.config/systeen/`) ;
 - les fichiers de cache et de mise à jour temporaires.
@@ -385,6 +424,15 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 ---
 
 ## Notes de version
+
+### 0.7.2
+
+- Nouvelle option **`--install`** : ajoute la commande `systeen` dans `/usr/local/bin` (lien vers `systeen.py`, qui ne bouge pas). On peut alors taper `systeen script.st` ou `systeen --help` partout.
+- **`:go` ne redemande plus de confirmation** : l'avertissement `Y/n` du premier script suffit.
+- Nouvelles commandes **`:sayn?`** (défaut y) et **`:sayN?`** (défaut n) : questions à réponse `y` ou `n` uniquement.
+- Présentation des `:if` : décalage d'un espace par niveau, avec des conseils au lancement si ce n'est pas respecté (non bloquant).
+- **`--uninstall`** : nouvelle phrase de confirmation, et suppression de la commande `systeen`. Les scripts `.st` ne sont jamais touchés, les `.vars` sont supprimés.
+- Les messages d'aide affichent `systeen --help` quand SysTeen est lancé par la commande installée.
 
 ### 0.7.1
 
