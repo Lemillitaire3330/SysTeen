@@ -3,7 +3,7 @@
 **SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
 Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-> Version actuelle : **0.8.1**
+> Version actuelle : **0.8.2**
 > Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
@@ -192,6 +192,7 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 | `:var sys` | Crée les variables `$sys.…` |
 | `:save nom` | Garde la variable entre deux lancements |
 | `:say texte` | Affiche du texte |
+| `:sayr texte` | Remplace la dernière ligne affichée |
 | `:say? question ; variable` | Pose une question |
 | `:sayn? question ; variable` | Question y/n, Entrée = y |
 | `:sayN? question ; variable` | Question y/n, Entrée = n |
@@ -230,9 +231,26 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 | Commande | Description |
 |---|---|
 | `:say texte` | Affiche un texte (les `$variables` sont remplacées) |
+| `:sayr texte` | **Remplace la dernière ligne affichée** par ce texte (chargements, compteurs…) |
 | `:say? question ; variable` | Pose une question et stocke la réponse dans une variable **déjà créée** |
 | `:sayn? question ; variable` | Question à réponse `y` ou `n` uniquement, affichée `(Y/n)` : **Entrée = y** |
 | `:sayN? question ; variable` | Pareil, affichée `(y/N)` : **Entrée = n** (choix recommandé pour les actions risquées) |
+
+Exemple de chargement avec `:sayr` :
+
+```
+:say Chargement : 0%
+:wait 1 sec
+:sayr Chargement : 50%
+:wait 1 sec
+:sayr Chargement : 100% terminé !
+```
+
+- `:sayr` efface la ligne juste au-dessus du curseur (la dernière chose affichée, par `:say`, `:cmd`, un message SysTeen…) et la remplace. Plusieurs `:sayr` d'affilée se remplacent l'un l'autre.
+- Il peut s'utiliser en boucle : `:loop 5 :sayr Patientez...`
+- Il n'existe **pas** de `:sayr?`, `:saynr?` ni `:sayNr?` : une question attend une réponse au clavier, elle ne peut donc pas remplacer une ligne.
+- Il faut un vrai terminal. Si la sortie est redirigée vers un fichier ou un tube (`systeen script.st > sortie.txt`), le texte est simplement ajouté à la suite.
+- Une ligne plus longue que la largeur du terminal (qui passe à la ligne) n'est remplacée que sur sa dernière ligne d'écran : gardez les textes de `:sayr` courts.
 
 Avec `:sayn?` et `:sayN?`, la variable reçoit `y` ou `n`, ce qui se teste avec `:if $variable == y`. Toute autre réponse est refusée et la question est reposée.
 
@@ -543,7 +561,7 @@ Chaque `:if` doit se terminer par un `:elsend`. Le `:else` est facultatif. Les `
 :loop inf :say Ça tourne...
 ```
 
-Commandes acceptées dans cette forme : `:say`, `:cmd`, `:math`, `:wait`, `:run`, `:stop`, `:go`.
+Commandes acceptées dans cette forme : `:say`, `:sayr`, `:cmd`, `:math`, `:wait`, `:run`, `:stop`, `:go`.
 
 ### Répéter plusieurs lignes : `:loop N` ... `:loopend`
 
@@ -725,6 +743,10 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 ---
 
 ## Notes de version
+
+### 0.8.2
+
+- Nouvelle commande **`:sayr texte`** : remplace la dernière ligne affichée (chargements, compteurs, animations). Il n'existe volontairement pas de `:sayr?`, `:saynr?`… : une question attend une réponse au clavier et ne peut pas remplacer une ligne.
 
 ### 0.8.1
 
