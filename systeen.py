@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 # Phrase à taper pour confirmer la désinstallation
 UNINSTALL_PHRASE = (
@@ -208,10 +208,12 @@ class SafeMath:
 
 
 class SysTeen:
-    # $nom ou ${nom}
+    # $nom, ${nom} (le nom peut commencer par un chiffre : $1, ${1})
+    # et $$ qui donne un $ littéral
     VARIABLE_REFERENCE = re.compile(
-        r"\$\{([A-Za-z_][A-Za-z0-9_.]*)\}"
-        r"|\$([A-Za-z_][A-Za-z0-9_.]*)"
+        r"\$\$"
+        r"|\$\{([A-Za-z0-9_][A-Za-z0-9_.]*)\}"
+        r"|\$([A-Za-z0-9_][A-Za-z0-9_.]*)"
     )
 
     # "and" / "or" entre deux conditions (seulement si ce qui suit
@@ -223,7 +225,7 @@ class SysTeen:
 
     # ":cmd commande ; variable"
     CMD_CAPTURE = re.compile(
-        r"^(.*\S)\s*;\s*([A-Za-z_][A-Za-z0-9_.]*)\s*$",
+        r"^(.*\S)\s*;\s*([A-Za-z0-9_][A-Za-z0-9_.]*)\s*$",
         re.DOTALL
     )
 
@@ -569,6 +571,15 @@ class SysTeen:
         if not name:
             raise SysTeenError("Nom de variable manquant.")
 
+        # Un nom qu'on ne pourrait jamais écrire avec $nom serait
+        # inutilisable : on le refuse tout de suite.
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.]*", name):
+            raise SysTeenError(
+                f"Nom de variable invalide : '{name}'. Lettres, "
+                "chiffres, _ et . uniquement (pas de $, de crochets "
+                "ni d'espaces)."
+            )
+
         if name in self.variables:
             raise SysTeenError(f"La variable '{name}' existe déjà.")
 
@@ -605,6 +616,10 @@ class SysTeen:
         pattern = self.VARIABLE_REFERENCE
 
         def replace_variable(match):
+            # $$ -> $ littéral (ex. $$HOME pour le shell)
+            if match.group(0) == "$$":
+                return "$"
+
             name = match.group(1) or match.group(2)
 
             if name not in self.variables:
@@ -1279,6 +1294,15 @@ class SysTeen:
                     sys_loaded = True
 
                 elif len(tokens) == 2 and tokens[0] == "add":
+                    if not re.fullmatch(
+                        r"[A-Za-z0-9_][A-Za-z0-9_.]*", tokens[1]
+                    ):
+                        errors.append((
+                            number,
+                            f"nom de variable invalide : '{tokens[1]}' "
+                            "(lettres, chiffres, _ et . uniquement)."
+                        ))
+
                     if tokens[1] in added:
                         warnings.append((
                             number,
@@ -1435,13 +1459,16 @@ class SysTeen:
 
             if command == "if":
                 references_text = re.sub(
-                    r"(?:not\s+)?exist\s+\$\{?[A-Za-z_][A-Za-z0-9_.]*\}?",
+                    r"(?:not\s+)?exist\s+\$\{?[A-Za-z0-9_][A-Za-z0-9_.]*\}?",
                     "",
                     scan_text
                 )
 
             for match in self.VARIABLE_REFERENCE.finditer(references_text):
                 name = match.group(1) or match.group(2)
+
+                if name is None:
+                    continue
 
                 if (number, name) in reported:
                     continue
@@ -4256,6 +4283,10 @@ def run_simple_mode(arguments, action):
     except KeyboardInterrupt:
         print("\n[SysTeen] Arrêt.")
         sys.exit(130)
+
+    except BrokenPipeError:
+        # sortie coupée (ex. `systeen --readme | head`) : pas une erreur
+        sys.exit(0)
 
     except Exception as error:
         print(f"[SysTeen] Erreur inattendue : {error}")
