@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 
 # Phrase à taper pour confirmer la désinstallation
 UNINSTALL_PHRASE = (
@@ -43,8 +43,8 @@ MAX_READ_BYTES = 10 * 1024 * 1024
 
 # Commandes connues (utilisé par --check)
 KNOWN_COMMANDS = {
-    "systeen", "#", "v", "var", "save", "say", "say?", "sayn?", "sayN?",
-    "math", "cmd", "run", "stop", "go", "cd", "del", "del!", "rmf",
+    "systeen", "#", "v", "var", "save", "say", "sayr", "say?", "sayn?",
+    "sayN?", "math", "cmd", "run", "stop", "go", "cd", "del", "del!", "rmf",
     "add", "edit", "read", "copy", "paste", "pause", "wait", "re",
     "off", "if", "else", "elsend", "loop", "loopend",
 }
@@ -1205,7 +1205,9 @@ class SysTeen:
 
         total = len(self.lines)
 
-        inline_commands = {"say", "cmd", "math", "wait", "run", "stop", "go"}
+        inline_commands = {
+            "say", "sayr", "cmd", "math", "wait", "run", "stop", "go"
+        }
 
         wait_units = {"sec", "min", "h", "j", "y"}
 
@@ -1705,6 +1707,30 @@ class SysTeen:
 
     def command_say(self, content):
         print(self.interpolate(content))
+
+    def command_say_replace(self, content):
+        """
+        :sayr texte
+            Remplace la dernière ligne affichée par ce texte
+            (chargements, compteurs, animations...).
+
+        Il n'existe pas de variante avec question (pas de :sayr?) :
+        une question attend une réponse au clavier et ne peut donc
+        pas remplacer une ligne.
+
+        Si la sortie n'est pas un vrai terminal (redirection vers un
+        fichier ou un tube), le texte est simplement ajouté.
+        """
+
+        text = self.interpolate(content)
+
+        if not sys.stdout.isatty():
+            print(text)
+            return
+
+        # monte d'une ligne, revient en début de ligne, l'efface
+        sys.stdout.write("\033[1A\r\033[2K" + text + "\n")
+        sys.stdout.flush()
 
     def command_say_input(self, content):
         if ";" not in content:
@@ -3772,6 +3798,10 @@ class SysTeen:
             self.command_say(args)
             return
 
+        if name == "sayr":
+            self.command_say_replace(args)
+            return
+
         if name == "cmd":
             self.command_cmd(args)
             return
@@ -3961,6 +3991,11 @@ class SysTeen:
 
         if command == "say?":
             self.command_say_input(args)
+
+            return line_index + 1
+
+        if command == "sayr":
+            self.command_say_replace(args)
 
             return line_index + 1
 
