@@ -2,6 +2,7 @@
 
 import ast
 import getpass
+import hashlib
 import json
 import operator
 import os
@@ -21,7 +22,7 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.8.2"
+VERSION = "0.8.3"
 
 # Phrase à taper pour confirmer la désinstallation
 UNINSTALL_PHRASE = (
@@ -32,29 +33,50 @@ UNINSTALL_PHRASE = (
 # Profondeur maximale de scripts lancés les uns par les autres avec :go
 MAX_GO_DEPTH = 5
 
+# Profondeur maximale d'abréviations appelant d'autres abréviations
+MAX_ABV_DEPTH = 10
+
 # Emplacement de la commande `systeen` (lien vers systeen.py)
 BIN_LINK_PATH = Path("/usr/local/bin/systeen")
+
+# Dossier des données (configuration, variables permanentes .vars,
+# abréviations .csys). Chaque utilisateur a son sous-dossier :
+# /var/lib/systeen/<utilisateur>/
+DATA_ROOT = Path("/var/lib/systeen")
 
 # Nombre maximal de conseils d'indentation affichés au lancement
 MAX_INDENT_WARNINGS = 10
 
-# Taille maximale d'un fichier lu par :read (10 Mo)
+# Taille maximale d'un fichier lu par :get (10 Mo)
 MAX_READ_BYTES = 10 * 1024 * 1024
 
 # Commandes connues (utilisé par --check)
 KNOWN_COMMANDS = {
-    "systeen", "#", "v", "var", "save", "say", "sayr", "say?", "sayn?",
-    "sayN?", "math", "cmd", "run", "stop", "go", "cd", "del", "del!", "rmf",
-    "add", "edit", "read", "copy", "paste", "pause", "wait", "re",
-    "off", "if", "else", "elsend", "loop", "loopend",
+    "sys", "#", "v", "var", "say", "syr", "say?", "yn?", "yN?", "cal",
+    "cmd", "run", "kil", "go", "cd", "del", "del!", "rmf", "add", "txt",
+    "get", "cpy", "pst", "pau", "wai", "re", "off", "if", "if+", "els",
+    "eif", "rep", "erp", "abv",
+}
+
+# Anciens noms de commandes (avant la 0.8.3) -> nouveau nom
+# (None : la commande n'existe plus)
+OLD_COMMANDS = {
+    "systeen": "sys", "sayr": "syr", "sayn?": "yn?", "sayN?": "yN?",
+    "math": "cal", "stop": "kil", "edit": "txt", "read": "get",
+    "copy": "cpy", "paste": "pst", "pause": "pau", "wait": "wai",
+    "else": "els", "elsend": "eif", "loop": "rep", "loopend": "erp",
+    "crea": "add", "save": None,
 }
 
 # Commandes qui exigent au moins un argument (utilisé par --check)
 COMMANDS_WITH_ARGUMENT = {
-    "systeen", "var", "save", "say?", "sayn?", "sayN?", "math", "cmd",
-    "run", "stop", "go", "cd", "del", "del!", "rmf", "add", "edit",
-    "read", "copy", "paste", "wait", "if", "loop",
+    "sys", "var", "say?", "yn?", "yN?", "cal", "cmd", "run", "kil", "go",
+    "cd", "del", "del!", "rmf", "add", "txt", "get", "cpy", "pst", "wai",
+    "if", "if+", "rep", "abv",
 }
+
+# ":abv nom {"
+ABV_HEADER = re.compile(r"([A-Za-z][A-Za-z0-9_]*)\s*\{")
 
 # Commandes internes du shell : `:cmd echo a ; echo b` reste du shell
 SHELL_BUILTINS = {
@@ -140,6 +162,23 @@ class SysTeenError(Exception):
     pass
 
 
+def old_command_message(command):
+    """Message pour une commande renommée/supprimée (sinon None)."""
+
+    if command not in OLD_COMMANDS:
+        return None
+
+    new = OLD_COMMANDS[command]
+
+    if new is None:
+        return (
+            f"La commande :{command} n'existe plus : utilisez "
+            ":var add !nom pour une variable permanente."
+        )
+
+    return f"La commande :{command} a été renommée :{new}."
+
+
 def get_real_home():
     """
     Retourne le dossier personnel de l'utilisateur réel.
@@ -160,6 +199,45 @@ def get_real_home():
         pass
 
     return Path.home()
+
+
+def get_real_user():
+    """Nom de l'utilisateur réel (même sous sudo)."""
+
+    try:
+        if os.geteuid() == 0:
+            sudo_user = os.environ.get("SUDO_USER")
+
+            if sudo_user and sudo_user != "root":
+                return sudo_user
+
+    except Exception:
+        pass
+
+    try:
+        return pwd.getpwuid(os.geteuid()).pw_name
+
+    except KeyError:
+        return getpass.getuser()
+
+
+def fix_owner(path):
+    """
+    Sous sudo, rend un fichier ou un dossier créé par root à
+    l'utilisateur réel (sinon il ne pourrait plus le modifier).
+    """
+
+    try:
+        if os.geteuid() == 0:
+            sudo_user = os.environ.get("SUDO_USER")
+
+            if sudo_user and sudo_user != "root":
+                info = pwd.getpwnam(sudo_user)
+
+                os.chown(path, info.pw_uid, info.pw_gid)
+
+    except Exception:
+        pass
 
 
 class SafeMath:
@@ -249,18 +327,23 @@ class SysTeen:
         # (la fenêtre attend alors une touche avant de se fermer)
         self.window_mode = False
 
-        # Contenu du presse-papiers de :copy / :paste
+        # Contenu du presse-papiers de :cpy / :pst
         self.clipboard = None
 
-        # Boucles en bloc (:loop N ... :loopend) en cours
+        # Boucles en bloc (:rep N ... :erp) en cours
         self.block_stack = []
 
         self.update_fingerprint = None
 
-        # Configuration persistante (toujours celle du vrai utilisateur)
-        self.config_dir = get_real_home() / ".config" / "systeen"
+        # Données persistantes (toujours celles du vrai utilisateur) :
+        # /var/lib/systeen/<utilisateur>/
+        self.config_dir = DATA_ROOT / get_real_user()
         self.config_file = self.config_dir / "config.json"
-        self.registry_file = self.config_dir / "vars_registry.json"
+        self.abv_dir = self.config_dir / "abv"
+
+        # Abréviations (:abv) : nom -> liste de lignes
+        self.abbreviations = {}
+        self.abv_depth = 0
 
         if script_path is None:
             # Mode sans script : python systeen.py --maj / --change / ...
@@ -292,9 +375,9 @@ class SysTeen:
         if not self.lines:
             raise SysTeenError("Le fichier SysTeen est vide.")
 
-        if self.lines[0].strip() != ":systeen start":
+        if self.lines[0].strip() != ":sys start":
             raise SysTeenError(
-                "La première ligne doit être :systeen start"
+                "La première ligne doit être :sys start"
             )
 
         self.variables = {}
@@ -305,25 +388,49 @@ class SysTeen:
 
         self.loop_states = {}
 
-        self.save_file = Path(str(self.script_path) + ".vars")
+        # Variables permanentes (:var add !nom) : un fichier par script,
+        # dans le dossier de données de l'utilisateur
+        digest = hashlib.sha1(
+            str(self.script_path).encode("utf-8")
+        ).hexdigest()[:8]
+
+        self.save_file = (
+            self.config_dir / f"{self.script_path.stem}-{digest}.vars"
+        )
 
         self.safety_enabled = True
         self.update_fingerprint = None
 
-        # Variables sauvegardées
+        # Variables permanentes et abréviations
         self.load_saved_variables()
+        self.load_abbreviations()
 
     # =========================================================
     # CONFIGURATION / SECURITE
     # =========================================================
 
     def ensure_config_directory(self):
+        # Dossier commun, créé une seule fois (avec sudo si besoin)
+        if not DATA_ROOT.is_dir():
+            if os.geteuid() != 0:
+                print(
+                    f"[SysTeen] Création de {DATA_ROOT} : "
+                    "le mot de passe sudo peut être demandé."
+                )
+
+            self.run_privileged(
+                ["install", "-d", "-m", "1777", str(DATA_ROOT)],
+                f"Impossible de créer {DATA_ROOT}."
+            )
+
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             os.chmod(self.config_dir, 0o700)
         except OSError:
             pass
+
+        fix_owner(self.config_dir)
 
     def load_security_config(self):
         """
@@ -378,6 +485,8 @@ class SysTeen:
             os.chmod(self.config_file, 0o600)
         except OSError:
             pass
+
+        fix_owner(self.config_file)
 
     def ask_security_preference(self):
         print()
@@ -495,44 +604,6 @@ class SysTeen:
                 "charger les variables sauvegardées."
             )
 
-    def read_vars_registry(self):
-        """Liste des fichiers .vars connus (pour --uninstall)."""
-
-        try:
-            data = json.loads(
-                self.registry_file.read_text(encoding="utf-8")
-            )
-
-            if isinstance(data, list):
-                return [item for item in data if isinstance(item, str)]
-
-        except Exception:
-            pass
-
-        return []
-
-    def register_vars_file(self):
-        """Mémorise l'emplacement du .vars pour pouvoir le supprimer."""
-
-        try:
-            entries = self.read_vars_registry()
-            entry = str(self.save_file)
-
-            if entry in entries:
-                return
-
-            self.ensure_config_directory()
-
-            entries.append(entry)
-
-            self.registry_file.write_text(
-                json.dumps(entries, ensure_ascii=False, indent=2),
-                encoding="utf-8"
-            )
-
-        except OSError:
-            pass
-
     def write_saved_variables(self):
         data = {}
 
@@ -541,12 +612,14 @@ class SysTeen:
                 data[name] = self.variables[name]
 
         if data:
+            self.ensure_config_directory()
+
             self.save_file.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8"
             )
 
-            self.register_vars_file()
+            fix_owner(self.save_file)
 
         else:
             try:
@@ -568,8 +641,21 @@ class SysTeen:
         return self.variables[name]
 
     def create_variable(self, name):
+        """
+        :var add $nom   variable normale
+        :var add !nom   variable permanente (gardée entre deux lancements)
+        """
+
         if not name:
             raise SysTeenError("Nom de variable manquant.")
+
+        marker, name = name[:1], name[1:]
+
+        if marker not in ("$", "!"):
+            raise SysTeenError(
+                "Syntaxe : :var add $nom "
+                "(ou :var add !nom pour une variable permanente)."
+            )
 
         # Un nom qu'on ne pourrait jamais écrire avec $nom serait
         # inutilisable : on le refuse tout de suite.
@@ -580,10 +666,21 @@ class SysTeen:
                 "ni d'espaces)."
             )
 
+        persistent = marker == "!"
+
+        # Variable permanente déjà rechargée depuis le fichier .vars
+        if persistent and name in self.saved_variables:
+            return
+
         if name in self.variables:
             raise SysTeenError(f"La variable '{name}' existe déjà.")
 
         self.variables[name] = "X"
+
+        if persistent:
+            self.saved_variables.add(name)
+
+            self.write_saved_variables()
 
     def set_variable(self, name, value):
         self.require_variable(name)
@@ -598,12 +695,124 @@ class SysTeen:
 
         self.write_saved_variables()
 
-    def save_variable(self, name):
-        self.require_variable(name)
+    # =========================================================
+    # ABREVIATIONS (:abv) - fichiers .csys
+    # =========================================================
 
-        self.saved_variables.add(name)
+    def load_abbreviations(self):
+        """Charge les abréviations (un fichier .csys chacune)."""
 
-        self.write_saved_variables()
+        self.abbreviations = {}
+
+        try:
+            for file in sorted(self.abv_dir.glob("*.csys")):
+                self.abbreviations[file.stem] = file.read_text(
+                    encoding="utf-8"
+                ).splitlines()
+
+        except OSError:
+            pass
+
+    def find_abv_end(self, start):
+        for index in range(start + 1, len(self.lines)):
+            if self.lines[index].strip() == "}":
+                return index
+
+        raise SysTeenError(":abv sans } fermant.")
+
+    def command_abv(self, line_index, content):
+        """
+        :abv nom {
+         :commandes
+        }
+
+        Crée un raccourci : ensuite :nom exécute ces commandes.
+        Le raccourci est gardé dans un fichier nom.csys du dossier de
+        données de l'utilisateur et reste disponible dans tous les
+        scripts.
+        """
+
+        match = ABV_HEADER.fullmatch(content.strip())
+
+        if match is None:
+            raise SysTeenError(
+                "Syntaxe : :abv nom {  (puis les commandes, "
+                "puis } seul sur une ligne)"
+            )
+
+        name = match.group(1)
+
+        if name in KNOWN_COMMANDS or name in OLD_COMMANDS:
+            raise SysTeenError(
+                f"Le nom :{name} est réservé : choisissez-en un autre."
+            )
+
+        end_line = self.find_abv_end(line_index)
+
+        body = [
+            line.rstrip()
+            for line in self.lines[line_index + 1:end_line]
+        ]
+
+        if self.abbreviations.get(name) != body:
+            self.abbreviations[name] = body
+
+            self.ensure_config_directory()
+
+            self.abv_dir.mkdir(exist_ok=True)
+
+            fix_owner(self.abv_dir)
+
+            file = self.abv_dir / f"{name}.csys"
+
+            file.write_text("\n".join(body) + "\n", encoding="utf-8")
+
+            fix_owner(file)
+
+        return end_line + 1
+
+    def run_abbreviation(self, name):
+        if self.abv_depth >= MAX_ABV_DEPTH:
+            raise SysTeenError(
+                "Trop d'abréviations appelées les unes par les autres "
+                f"(limite : {MAX_ABV_DEPTH})."
+            )
+
+        saved = (self.lines, self.block_stack, self.loop_states)
+
+        self.lines = list(self.abbreviations[name])
+        self.block_stack = []
+        self.loop_states = {}
+
+        self.abv_depth += 1
+
+        try:
+            index = 0
+
+            while index < len(self.lines) and self.running:
+                try:
+                    index = self.execute_line(index)
+
+                except SysTeenError as error:
+                    print(
+                        f"[SysTeen] Erreur dans :{name} ligne "
+                        f"{index + 1} : {error}"
+                    )
+
+                    index += 1
+
+                except Exception as error:
+                    print(
+                        f"[SysTeen] Erreur inattendue dans :{name} "
+                        f"ligne {index + 1} : {error}"
+                    )
+
+                    index += 1
+
+        finally:
+            self.abv_depth -= 1
+
+            self.lines, self.block_stack, self.loop_states = saved
 
     # =========================================================
     # INTERPOLATION
@@ -1006,12 +1215,18 @@ class SysTeen:
         return False
 
     # =========================================================
-    # IF / ELSE
+    # IF / IF+ / ELS
     # =========================================================
 
     def find_if_structure(self, start):
+        """
+        Retourne (clauses, fin) pour le :if qui précède la ligne `start` :
+        clauses = liste de (type, ligne) des :if+ et :els du même niveau,
+        fin = ligne du :eif.
+        """
+
         depth = 0
-        else_line = None
+        clauses = []
 
         for index in range(start, len(self.lines)):
             line = self.lines[index].strip()
@@ -1030,28 +1245,51 @@ class SysTeen:
                 depth += 1
                 continue
 
-            if command == "elsend":
+            if command == "eif":
 
                 if depth == 0:
-                    return else_line, index
+                    return clauses, index
 
                 depth -= 1
                 continue
 
-            if command == "else":
-                if depth == 0:
+            if depth == 0 and command in ("if+", "els"):
 
-                    if else_line is not None:
+                if clauses and clauses[-1][0] == "els":
+                    if command == "els":
                         raise SysTeenError(
-                            "Plusieurs :else dans le même :if."
+                            "Plusieurs :els dans le même :if."
                         )
 
-                    else_line = index
+                    raise SysTeenError(":if+ après un :els.")
 
-        raise SysTeenError(":if sans :elsend.")
+                clauses.append((command, index))
+
+        raise SysTeenError(":if sans :eif.")
+
+    def choose_branch(self, clauses, end_line):
+        """
+        Le :if (ou :if+) précédent est faux : retourne la ligne où
+        continuer (premier :if+ vrai, sinon :els, sinon après :eif).
+        """
+
+        for kind, index in clauses:
+            if kind == "els":
+                return index + 1
+
+            parts = self.lines[index].strip()[1:].strip().split(
+                maxsplit=1
+            )
+
+            condition = parts[1] if len(parts) > 1 else ""
+
+            if self.parse_condition(condition):
+                return index + 1
+
+        return end_line + 1
 
     # =========================================================
-    # PRESENTATION DES :if / :loop (conseil) ET VERIFICATION
+    # PRESENTATION DES :if / :rep (conseil) ET VERIFICATION
     # =========================================================
 
     def check_indentation(self):
@@ -1059,15 +1297,15 @@ class SysTeen:
         Parcourt le script (sans l'exécuter) et retourne une liste
         de (type, ligne, texte) :
 
-          "structure" : :if / :loop mal fermés (vraie erreur)
+          "structure" : :if / :rep / :abv mal fermés (vraie erreur)
           "style"     : décalage conseillé, 1 espace par niveau
 
             :if condition
              :commande
              :if autre_condition
               :commande
-             :elsend
-            :elsend
+             :eif
+            :eif
 
         Ne bloque jamais l'exécution d'un script.
         """
@@ -1079,6 +1317,19 @@ class SysTeen:
         while index < len(self.lines):
             raw = self.lines[index]
             stripped = raw.strip()
+
+            # Fin d'une abréviation
+            if stripped == "}":
+                if stack and stack[-1] == "abv":
+                    stack.pop()
+
+                else:
+                    issues.append(
+                        ("structure", index + 1, "} sans :abv.")
+                    )
+
+                index += 1
+                continue
 
             if not stripped.startswith(":"):
                 index += 1
@@ -1100,36 +1351,40 @@ class SysTeen:
                 expected = {depth}
                 stack.append("if")
 
-            elif command == "loop" and self.is_block_loop_line(raw):
+            elif command == "rep" and self.is_block_loop_line(raw):
                 expected = {depth}
                 stack.append("loop")
 
-            elif command == "else":
+            elif command == "abv":
+                expected = {depth}
+                stack.append("abv")
+
+            elif command in ("els", "if+"):
                 if not stack or stack[-1] != "if":
                     issues.append(
-                        ("structure", number, ":else sans :if.")
+                        ("structure", number, f":{command} sans :if.")
                     )
 
                 expected = {max(depth - 1, 0), depth}
 
-            elif command == "elsend":
+            elif command == "eif":
                 if stack and stack[-1] == "if":
                     stack.pop()
 
                 else:
                     issues.append(
-                        ("structure", number, ":elsend sans :if.")
+                        ("structure", number, ":eif sans :if.")
                     )
 
                 expected = {len(stack)}
 
-            elif command == "loopend":
+            elif command == "erp":
                 if stack and stack[-1] == "loop":
                     stack.pop()
 
                 else:
                     issues.append(
-                        ("structure", number, ":loopend sans :loop.")
+                        ("structure", number, ":erp sans :rep.")
                     )
 
                 expected = {len(stack)}
@@ -1149,9 +1404,9 @@ class SysTeen:
                     f"{indent} trouvé(s)."
                 ))
 
-            # Un :edit sur plusieurs lignes : le texte entre
+            # Un :txt sur plusieurs lignes : le texte entre
             # guillemets n'est pas du code SysTeen.
-            if command == "edit":
+            if command == "txt":
                 try:
                     _, last_line = self.find_edit_text(
                         index,
@@ -1167,19 +1422,27 @@ class SysTeen:
 
         unclosed_if = stack.count("if")
         unclosed_loop = stack.count("loop")
+        unclosed_abv = stack.count("abv")
 
         if unclosed_if:
             issues.append((
                 "structure", None,
-                f"il manque {unclosed_if} :elsend pour fermer "
+                f"il manque {unclosed_if} :eif pour fermer "
                 "les :if."
             ))
 
         if unclosed_loop:
             issues.append((
                 "structure", None,
-                f"il manque {unclosed_loop} :loopend pour fermer "
-                "les :loop."
+                f"il manque {unclosed_loop} :erp pour fermer "
+                "les :rep."
+            ))
+
+        if unclosed_abv:
+            issues.append((
+                "structure", None,
+                f"il manque {unclosed_abv} }} pour fermer "
+                "les :abv."
             ))
 
         return issues
@@ -1189,9 +1452,9 @@ class SysTeen:
         systeen --check script.st
 
         Vérifie le script SANS l'exécuter : commandes inconnues,
-        :if / :loop mal fermés, variables utilisées avant d'être
-        créées, fichiers de :go introuvables, syntaxe de :wait et
-        :loop, etc. Retourne le nombre d'erreurs.
+        :if / :rep / :abv mal fermés, variables utilisées avant d'être
+        créées, fichiers de :go introuvables, syntaxe de :wai et
+        :rep, etc. Retourne le nombre d'erreurs.
         """
 
         errors = []
@@ -1199,6 +1462,7 @@ class SysTeen:
 
         created = set(self.variables)   # variables déjà sauvegardées
         added = set()
+        defined_abv = set()
         sys_loaded = False
         has_end = False
         reported = set()
@@ -1206,7 +1470,7 @@ class SysTeen:
         total = len(self.lines)
 
         inline_commands = {
-            "say", "sayr", "cmd", "math", "wait", "run", "stop", "go"
+            "say", "syr", "cmd", "cal", "wai", "run", "kil", "go"
         }
 
         wait_units = {"sec", "min", "h", "j", "y"}
@@ -1242,7 +1506,7 @@ class SysTeen:
             last_line = index
             scan_text = command_line
 
-            if command == "edit":
+            if command == "txt":
                 try:
                     _, last_line = self.find_edit_text(index, args)
 
@@ -1256,14 +1520,23 @@ class SysTeen:
                     errors.append((
                         number,
                         f"la variable '{name}' n'est pas créée avant "
-                        f"cette ligne (:var add {name})."
+                        f"cette ligne (:var add ${name})."
                     ))
 
             if command not in KNOWN_COMMANDS:
-                if command == "crea":
-                    errors.append((
-                        number, ":crea a été renommée :add."
-                    ))
+                if command in OLD_COMMANDS:
+                    errors.append((number, old_command_message(command)))
+
+                elif (
+                    command in defined_abv
+                    or command in self.abbreviations
+                ):
+                    if args.strip():
+                        errors.append((
+                            number,
+                            f":{command} est une abréviation : "
+                            "elle n'accepte pas d'argument."
+                        ))
 
                 else:
                     errors.append((
@@ -1278,7 +1551,7 @@ class SysTeen:
                     number, f"arguments manquants pour :{command}."
                 ))
 
-            if command == "systeen":
+            if command == "sys":
                 option = args.strip()
 
                 if option == "end":
@@ -1286,7 +1559,7 @@ class SysTeen:
 
                 elif option != "start":
                     errors.append((
-                        number, "commande systeen inconnue."
+                        number, "commande sys inconnue."
                     ))
 
             elif command == "var":
@@ -1296,24 +1569,34 @@ class SysTeen:
                     sys_loaded = True
 
                 elif len(tokens) == 2 and tokens[0] == "add":
-                    if not re.fullmatch(
-                        r"[A-Za-z0-9_][A-Za-z0-9_.]*", tokens[1]
+                    name = tokens[1][1:]
+
+                    if tokens[1][:1] not in ("$", "!"):
+                        errors.append((
+                            number,
+                            "syntaxe : :var add $nom "
+                            "(ou :var add !nom pour une variable "
+                            "permanente)."
+                        ))
+
+                    elif not re.fullmatch(
+                        r"[A-Za-z0-9_][A-Za-z0-9_.]*", name
                     ):
                         errors.append((
                             number,
-                            f"nom de variable invalide : '{tokens[1]}' "
+                            f"nom de variable invalide : '{name}' "
                             "(lettres, chiffres, _ et . uniquement)."
                         ))
 
-                    if tokens[1] in added:
+                    if name in added and tokens[1][:1] != "!":
                         warnings.append((
                             number,
-                            f":var add {tokens[1]} déjà utilisé plus "
+                            f":var add ${name} déjà utilisé plus "
                             "haut : échoue si le script boucle."
                         ))
 
-                    added.add(tokens[1])
-                    created.add(tokens[1])
+                    added.add(name)
+                    created.add(name)
 
                 elif len(tokens) == 2 and tokens[0] == "rm":
                     require(tokens[1])
@@ -1324,10 +1607,24 @@ class SysTeen:
                 elif args.strip():
                     errors.append((number, "syntaxe de :var invalide."))
 
-            elif command == "save":
-                require(args.strip())
+            elif command == "abv":
+                match = ABV_HEADER.fullmatch(args.strip())
 
-            elif command in ("say?", "sayn?", "sayN?"):
+                if match is None:
+                    errors.append((number, "syntaxe : :abv nom {"))
+
+                else:
+                    name = match.group(1)
+
+                    if name in KNOWN_COMMANDS or name in OLD_COMMANDS:
+                        errors.append((
+                            number,
+                            f"le nom :{name} est réservé."
+                        ))
+
+                    defined_abv.add(name)
+
+            elif command in ("say?", "yn?", "yN?"):
                 if ";" not in args:
                     errors.append((
                         number,
@@ -1337,20 +1634,20 @@ class SysTeen:
                 else:
                     require(args.rsplit(";", 1)[1].strip())
 
-            elif command == "math":
+            elif command == "cal":
                 if ";" in args:
                     require(args.rsplit(";", 1)[1].strip())
 
-            elif command == "read":
+            elif command == "get":
                 if ";" not in args:
                     errors.append((
-                        number, "syntaxe : :read [fichier] ; [variable]"
+                        number, "syntaxe : :get [fichier] ; [variable]"
                     ))
 
                 else:
                     require(args.rsplit(";", 1)[1].strip())
 
-            elif command == "cmd":
+            elif command in ("cmd", "#"):
                 match = self.CMD_CAPTURE.match(args.strip())
 
                 if match is not None:
@@ -1385,7 +1682,7 @@ class SysTeen:
                             number, f":go : fichier introuvable : {target}"
                         ))
 
-            elif command == "wait":
+            elif command == "wai":
                 tokens = args.lower().split()
 
                 valid = len(tokens) == 2 and tokens[1] in wait_units
@@ -1400,10 +1697,10 @@ class SysTeen:
                 if args.strip() and not valid:
                     errors.append((
                         number,
-                        "syntaxe : :wait [nombre] [sec/min/h/j/y]"
+                        "syntaxe : :wai [nombre] [sec/min/h/j/y]"
                     ))
 
-            elif command == "loop" and not self.is_block_loop_line(raw):
+            elif command == "rep" and not self.is_block_loop_line(raw):
                 tokens = args.split(maxsplit=2)
 
                 if tokens and tokens[0].startswith("L"):
@@ -1411,7 +1708,7 @@ class SysTeen:
 
                     if "-" not in data:
                         errors.append((
-                            number, "syntaxe : :loop L5-2 ou :loop L5-inf"
+                            number, "syntaxe : :rep L5-2 ou :rep L5-inf"
                         ))
 
                     else:
@@ -1423,7 +1720,7 @@ class SysTeen:
                         ):
                             errors.append((
                                 number,
-                                "ligne cible inexistante dans :loop."
+                                "ligne cible inexistante dans :rep."
                             ))
 
                         if not (
@@ -1436,7 +1733,7 @@ class SysTeen:
                 elif tokens:
                     if len(tokens) < 2:
                         errors.append((
-                            number, ":loop doit contenir une commande."
+                            number, ":rep doit contenir une commande."
                         ))
 
                     else:
@@ -1459,12 +1756,15 @@ class SysTeen:
             # Variables utilisées ($nom ou ${nom})
             references_text = scan_text
 
-            if command == "if":
+            if command in ("if", "if+"):
                 references_text = re.sub(
                     r"(?:not\s+)?exist\s+\$\{?[A-Za-z0-9_][A-Za-z0-9_.]*\}?",
                     "",
                     scan_text
                 )
+
+            if command == "var" and args.split()[:1] == ["add"]:
+                references_text = ""
 
             for match in self.VARIABLE_REFERENCE.finditer(references_text):
                 name = match.group(1) or match.group(2)
@@ -1488,7 +1788,7 @@ class SysTeen:
                     errors.append((
                         number,
                         f"la variable '{name}' est utilisée avant "
-                        f"d'être créée (:var add {name})."
+                        f"d'être créée (:var add ${name})."
                     ))
 
             index = last_line + 1
@@ -1496,7 +1796,7 @@ class SysTeen:
         if not has_end:
             warnings.append((
                 None,
-                "pas de :systeen end : le script recommence depuis "
+                "pas de :sys end : le script recommence depuis "
                 "la première ligne quand il arrive à la fin."
             ))
 
@@ -1633,7 +1933,7 @@ class SysTeen:
             path.mkdir(parents=True)
 
     # =========================================================
-    # EDIT
+    # TXT (ancien :edit)
     # =========================================================
 
     def find_edit_text(self, line_index, first_line):
@@ -1642,7 +1942,7 @@ class SysTeen:
         first_quote = text.find('"')
 
         if first_quote == -1:
-            raise SysTeenError('Syntaxe : :edit [fichier] "texte"')
+            raise SysTeenError('Syntaxe : :txt [fichier] "texte"')
 
         content = text[first_quote + 1:]
 
@@ -1656,7 +1956,7 @@ class SysTeen:
 
             if line_index >= len(self.lines):
                 raise SysTeenError(
-                    "Guillemet fermant manquant dans :edit."
+                    "Guillemet fermant manquant dans :txt."
                 )
 
             content += "\n" + self.lines[line_index]
@@ -1665,16 +1965,16 @@ class SysTeen:
         content = content.strip()
 
         if not content:
-            raise SysTeenError('Syntaxe : :edit [fichier] "texte"')
+            raise SysTeenError('Syntaxe : :txt [fichier] "texte"')
 
         first_quote = content.find('"')
 
         if first_quote == -1:
-            raise SysTeenError('Syntaxe : :edit [fichier] "texte"')
+            raise SysTeenError('Syntaxe : :txt [fichier] "texte"')
 
         filename = content[:first_quote].strip()
 
-        # :edit +fichier "texte" ajoute à la fin au lieu d'écraser
+        # :txt +fichier "texte" ajoute à la fin au lieu d'écraser
         append = filename.startswith("+")
 
         if append:
@@ -1710,11 +2010,11 @@ class SysTeen:
 
     def command_say_replace(self, content):
         """
-        :sayr texte
+        :syr texte
             Remplace la dernière ligne affichée par ce texte
             (chargements, compteurs, animations...).
 
-        Il n'existe pas de variante avec question (pas de :sayr?) :
+        Il n'existe pas de variante avec question (pas de :syr?) :
         une question attend une réponse au clavier et ne peut donc
         pas remplacer une ligne.
 
@@ -1750,19 +2050,19 @@ class SysTeen:
         self.variables[variable] = answer
 
     # =========================================================
-    # SAYN? / SAYN? : question à réponse y ou n uniquement
+    # YN? / YN? : question à réponse y ou n uniquement
     # =========================================================
 
     def command_say_yes_no(self, content, default_yes):
         """
-        :sayn? question ; variable   -> (Y/n) : Entrée = y
-        :sayN? question ; variable   -> (y/N) : Entrée = n
+        :yn? question ; variable   -> (Y/n) : Entrée = y
+        :yN? question ; variable   -> (y/N) : Entrée = n
 
         Seules les réponses y ou n sont acceptées (majuscules
         tolérées). La variable reçoit "y" ou "n".
         """
 
-        name = ":sayn?" if default_yes else ":sayN?"
+        name = ":yn?" if default_yes else ":yN?"
 
         if ";" not in content:
             raise SysTeenError(
@@ -1796,7 +2096,7 @@ class SysTeen:
         self.variables[variable] = value
 
     # =========================================================
-    # MATH
+    # CAL (ancien :math)
     # =========================================================
 
     def command_math(self, content):
@@ -1951,7 +2251,19 @@ class SysTeen:
                         "elle supprimerait / ou votre dossier personnel."
                     )
 
-    def command_cmd(self, content):
+    @staticmethod
+    def run_shell(command, root, **options):
+        """Exécute une ligne de shell (avec sudo si `root`)."""
+
+        if root and os.geteuid() != 0:
+            if shutil.which("sudo") is None:
+                raise SysTeenError("sudo est introuvable sur ce système.")
+
+            return subprocess.run(["sudo", "sh", "-c", command], **options)
+
+        return subprocess.run(command, shell=True, **options)
+
+    def command_cmd(self, content, root=False):
         """
         :cmd commande
             Exécute la commande dans le terminal.
@@ -1959,6 +2271,9 @@ class SysTeen:
         :cmd commande ; variable
             Met le résultat (sortie) de la commande dans une variable
             existante. Le retour à la ligne final est retiré.
+
+        :# commande   (root=True)
+            Pareil, mais la commande est exécutée en root (sudo).
         """
 
         raw_command, target = self.split_cmd_capture(content)
@@ -1970,22 +2285,25 @@ class SysTeen:
 
         self.check_dangerous_command(command)
 
-        print(
-            "[SysTeen] Attention : SysTeen va executer "
-            "une commande dans votre terminal."
-        )
+        if root:
+            print(
+                "[SysTeen] Attention : SysTeen va executer "
+                "une commande EN ROOT (sudo)."
+            )
+
+        else:
+            print(
+                "[SysTeen] Attention : SysTeen va executer "
+                "une commande dans votre terminal."
+            )
 
         print(f"[SysTeen] commande : {command}")
 
         if target is None:
-            subprocess.run(command, shell=True)
+            self.run_shell(command, root)
             return
 
-        result = subprocess.run(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE
-        )
+        result = self.run_shell(command, root, stdout=subprocess.PIPE)
 
         output = result.stdout.decode("utf-8", errors="replace")
 
@@ -2004,14 +2322,14 @@ class SysTeen:
             )
 
     # =========================================================
-    # READ / COPY / PASTE / PAUSE
+    # GET / CPY / PST / PAU
     # =========================================================
 
     def command_read(self, content):
-        """:read fichier ; variable"""
+        """:get fichier ; variable"""
 
         if ";" not in content:
-            raise SysTeenError("Syntaxe : :read [fichier] ; [variable]")
+            raise SysTeenError("Syntaxe : :get [fichier] ; [variable]")
 
         file_text, variable = content.rsplit(";", 1)
 
@@ -2033,7 +2351,7 @@ class SysTeen:
 
             if size > MAX_READ_BYTES:
                 raise SysTeenError(
-                    f"Fichier trop gros pour :read ({path}) : "
+                    f"Fichier trop gros pour :get ({path}) : "
                     f"{MAX_READ_BYTES // (1024 * 1024)} Mo maximum."
                 )
 
@@ -2058,12 +2376,12 @@ class SysTeen:
         self.variables[variable] = text
 
     def command_copy(self, content):
-        """:copy chemin   (mémorise un fichier ou un dossier)"""
+        """:cpy chemin   (mémorise un fichier ou un dossier)"""
 
         name = self.interpolate(content.strip())
 
         if not name:
-            raise SysTeenError("Syntaxe : :copy [fichier ou dossier]")
+            raise SysTeenError("Syntaxe : :cpy [fichier ou dossier]")
 
         path = self.safe_path(name)
 
@@ -2076,8 +2394,8 @@ class SysTeen:
 
     def command_paste(self, content):
         """
-        :paste destination
-            Colle l'élément mémorisé par :copy.
+        :pst destination
+            Colle l'élément mémorisé par :cpy.
 
             - destination = dossier existant (ou terminé par /) :
               l'élément est collé dedans, avec son nom d'origine ;
@@ -2087,7 +2405,7 @@ class SysTeen:
 
         if self.clipboard is None:
             raise SysTeenError(
-                "Rien à coller : utilisez d'abord :copy."
+                "Rien à coller : utilisez d'abord :cpy."
             )
 
         source = self.clipboard
@@ -2100,7 +2418,7 @@ class SysTeen:
         destination_text = self.interpolate(content.strip())
 
         if not destination_text:
-            raise SysTeenError("Syntaxe : :paste [destination]")
+            raise SysTeenError("Syntaxe : :pst [destination]")
 
         destination = self.safe_path(destination_text)
 
@@ -2137,7 +2455,7 @@ class SysTeen:
             )
 
     def command_pause(self, content):
-        """:pause [message]   (attend la touche Entrée)"""
+        """:pau [message]   (attend la touche Entrée)"""
 
         message = self.interpolate(content.strip())
 
@@ -2151,12 +2469,12 @@ class SysTeen:
             pass
 
     # =========================================================
-    # BOUCLES EN BLOC : :loop N ... :loopend
+    # BOUCLES EN BLOC : :rep N ... :erp
     # =========================================================
 
     @staticmethod
     def is_block_loop_line(line):
-        """Vrai pour ':loop 3' ou ':loop inf' seul sur la ligne."""
+        """Vrai pour ':rep 3' ou ':rep inf' seul sur la ligne."""
 
         stripped = line.strip()
 
@@ -2167,7 +2485,7 @@ class SysTeen:
 
         return (
             len(parts) == 2
-            and parts[0] == "loop"
+            and parts[0] == "rep"
             and (parts[1] == "inf" or parts[1].isdigit())
         )
 
@@ -2185,14 +2503,14 @@ class SysTeen:
 
             if (
                 stripped.startswith(":")
-                and stripped[1:].split()[:1] == ["loopend"]
+                and stripped[1:].split()[:1] == ["erp"]
             ):
                 if depth == 0:
                     return index
 
                 depth -= 1
 
-        raise SysTeenError(":loop sans :loopend.")
+        raise SysTeenError(":rep sans :erp.")
 
     def start_block_loop(self, line_index, count_text):
         end_line = self.find_loop_end(line_index)
@@ -2213,7 +2531,7 @@ class SysTeen:
 
     def command_loopend(self, line_index):
         if not self.block_stack:
-            raise SysTeenError(":loopend sans :loop.")
+            raise SysTeenError(":erp sans :rep.")
 
         entry = self.block_stack[-1]
 
@@ -2232,7 +2550,7 @@ class SysTeen:
         return line_index + 1
 
     # =========================================================
-    # RUN / STOP
+    # RUN / KIL
     # =========================================================
 
     def command_run(self, content):
@@ -2443,11 +2761,16 @@ class SysTeen:
 
     def command_elevate(self):
         """
+        :#   (sans argument)
+
         1) cd vers le dossier où se trouve systeen.py
         2) sudo python systeen.py <ce script>
         3) le script actuel s'arrête (le processus est remplacé)
 
         L'utilisateur n'a plus qu'à saisir le mot de passe root.
+
+        (Avec un argument, `:# commande` exécute une seule ligne en
+        root : voir command_cmd.)
         """
 
         if os.geteuid() == 0:
@@ -2471,7 +2794,7 @@ class SysTeen:
                 f"{error}"
             )
 
-        # Les variables sauvegardées doivent être écrites avant l'arrêt
+        # Les variables permanentes doivent être écrites avant l'arrêt
         self.write_saved_variables()
 
         command = [
@@ -2530,7 +2853,7 @@ class SysTeen:
         os.chdir(path)
 
     # =========================================================
-    # WAIT
+    # WAI (ancien :wait)
     # =========================================================
 
     def command_wait(self, content):
@@ -2538,7 +2861,7 @@ class SysTeen:
 
         if len(parts) != 2:
             raise SysTeenError(
-                "Syntaxe : :wait [nombre] [sec/min/h/j/y]"
+                "Syntaxe : :wai [nombre] [sec/min/h/j/y]"
             )
 
         try:
@@ -2781,15 +3104,6 @@ class SysTeen:
 
         candidates = []
 
-        # Fichiers .vars connus (registre) + ceux à côté du programme
-        for entry in self.read_vars_registry():
-            candidates.append(Path(entry))
-
-        try:
-            candidates.extend(program_dir.glob("*.st.vars"))
-        except OSError:
-            pass
-
         # README et fichiers de mise à jour temporaires
         candidates.append(self.readme_path)
 
@@ -2819,7 +3133,8 @@ class SysTeen:
         except OSError:
             pass
 
-        # Configuration (préférence de sécurité, registre)
+        # Données de l'utilisateur : configuration, fichiers .vars
+        # et abréviations .csys (/var/lib/systeen/<utilisateur>/)
         candidates.append(self.config_dir)
 
         targets = []
@@ -2854,6 +3169,13 @@ class SysTeen:
 
         if has_link:
             print(f"[SysTeen]   - {BIN_LINK_PATH} (commande systeen)")
+
+        if DATA_ROOT.is_dir():
+            print(
+                f"[SysTeen]   - {DATA_ROOT}/ (seulement s'il est "
+                "vide : les données des autres utilisateurs "
+                "ne sont pas touchées)"
+            )
 
         print(
             "[SysTeen] Vos scripts .st et la clé SLNE "
@@ -2898,6 +3220,19 @@ class SysTeen:
                 errors += 1
 
                 print(f"[SysTeen] {error}")
+
+        # Dossier commun : retiré seulement s'il est vide
+        try:
+            if DATA_ROOT.is_dir() and not any(DATA_ROOT.iterdir()):
+                self.run_privileged(
+                    ["rmdir", str(DATA_ROOT)],
+                    f"Impossible de supprimer {DATA_ROOT}."
+                )
+
+        except (OSError, SysTeenError) as error:
+            errors += 1
+
+            print(f"[SysTeen] {error}")
 
         if errors:
             print(
@@ -3749,13 +4084,13 @@ class SysTeen:
         self.install_update(release, latest_version)
 
     # =========================================================
-    # LOOP
+    # REP (ancien :loop)
     # =========================================================
 
     def execute_inline_loop(self, count_text, command):
         if not command.strip():
             raise SysTeenError(
-                ":loop doit être suivi d'une commande."
+                ":rep doit être suivi d'une commande."
             )
 
         if count_text == "inf":
@@ -3798,7 +4133,7 @@ class SysTeen:
             self.command_say(args)
             return
 
-        if name == "sayr":
+        if name == "syr":
             self.command_say_replace(args)
             return
 
@@ -3806,11 +4141,11 @@ class SysTeen:
             self.command_cmd(args)
             return
 
-        if name == "math":
+        if name == "cal":
             self.command_math(args)
             return
 
-        if name == "wait":
+        if name == "wai":
             self.command_wait(args)
             return
 
@@ -3818,7 +4153,7 @@ class SysTeen:
             self.command_run(args)
             return
 
-        if name == "stop":
+        if name == "kil":
             self.command_stop(args)
             return
 
@@ -3870,27 +4205,27 @@ class SysTeen:
 
         if not content:
             raise SysTeenError(
-                ":loop doit être suivi d'une commande."
+                ":rep doit être suivi d'une commande."
             )
 
         parts = content.split(maxsplit=2)
 
         first = parts[0]
 
-        # :loop 3 / :loop inf seul sur la ligne -> boucle en bloc
+        # :rep 3 / :rep inf seul sur la ligne -> boucle en bloc
         if len(parts) == 1 and (first == "inf" or first.isdigit()):
             return self.start_block_loop(line_index, first)
 
         if first.startswith("L"):
 
             if len(parts) != 1:
-                raise SysTeenError("Syntaxe : :loop L5-2")
+                raise SysTeenError("Syntaxe : :rep L5-2")
 
             loop_data = first[1:]
 
             if "-" not in loop_data:
                 raise SysTeenError(
-                    "Syntaxe : :loop L5-2 ou :loop L5-inf"
+                    "Syntaxe : :rep L5-2 ou :rep L5-inf"
                 )
 
             target, count = loop_data.split("-", 1)
@@ -3899,7 +4234,7 @@ class SysTeen:
 
         if len(parts) < 2:
             raise SysTeenError(
-                ":loop doit contenir une commande."
+                ":rep doit contenir une commande."
             )
 
         count_text = parts[0]
@@ -3943,7 +4278,7 @@ class SysTeen:
         args = parts[1] if len(parts) > 1 else ""
 
         # SYSTEME
-        if command == "systeen":
+        if command == "sys":
 
             option = args.strip()
 
@@ -3958,11 +4293,16 @@ class SysTeen:
 
                 return line_index + 1
 
-            raise SysTeenError("Commande systeen inconnue.")
+            raise SysTeenError("Commande sys inconnue.")
 
-        # RELANCE EN ROOT (:#)
+        # ROOT : :# relance le script en root, :# commande exécute
+        # une seule ligne en root
         if command == "#":
-            self.command_elevate()
+            if args.strip():
+                self.command_cmd(args, root=True)
+
+            else:
+                self.command_elevate()
 
             return line_index + 1
 
@@ -3978,10 +4318,9 @@ class SysTeen:
 
             return line_index + 1
 
-        if command == "save":
-            self.save_variable(args.strip())
-
-            return line_index + 1
+        # ABREVIATIONS
+        if command == "abv":
+            return self.command_abv(line_index, args)
 
         # SAY
         if command == "say":
@@ -3994,23 +4333,23 @@ class SysTeen:
 
             return line_index + 1
 
-        if command == "sayr":
+        if command == "syr":
             self.command_say_replace(args)
 
             return line_index + 1
 
-        if command == "sayn?":
+        if command == "yn?":
             self.command_say_yes_no(args, default_yes=True)
 
             return line_index + 1
 
-        if command == "sayN?":
+        if command == "yN?":
             self.command_say_yes_no(args, default_yes=False)
 
             return line_index + 1
 
         # MATH
-        if command == "math":
+        if command == "cal":
             self.command_math(args)
 
             return line_index + 1
@@ -4026,7 +4365,7 @@ class SysTeen:
 
             return line_index + 1
 
-        if command == "stop":
+        if command == "kil":
             self.command_stop(args)
 
             return line_index + 1
@@ -4063,16 +4402,11 @@ class SysTeen:
 
             return line_index + 1
 
-        if command == "crea":
-            raise SysTeenError(
-                "La commande :crea a été renommée :add."
-            )
-
-        if command == "edit":
+        if command == "txt":
             return self.command_edit(line_index, args) + 1
 
         # WAIT
-        if command == "wait":
+        if command == "wai":
             self.command_wait(args)
 
             return line_index + 1
@@ -4093,54 +4427,71 @@ class SysTeen:
 
             result = self.parse_condition(args)
 
-            else_line, end_line = self.find_if_structure(
+            clauses, end_line = self.find_if_structure(
                 line_index + 1
             )
 
             if result:
                 return line_index + 1
 
-            if else_line is not None:
-                return else_line + 1
+            return self.choose_branch(clauses, end_line)
 
-            return end_line + 1
-
-        # ELSE
-        if command == "else":
+        # IF+ / ELS : atteints à la fin d'une branche vraie,
+        # on saute directement à la fin du :if
+        if command in ("if+", "els"):
 
             _, end_line = self.find_if_structure(line_index + 1)
 
             return end_line + 1
 
-        # ELSEND
-        if command == "elsend":
+        # EIF
+        if command == "eif":
             return line_index + 1
 
         # LOOP
-        if command == "loop":
+        if command == "rep":
             return self.command_loop(line_index, args)
 
-        if command == "loopend":
+        if command == "erp":
             return self.command_loopend(line_index)
 
         # LECTURE / COPIE
-        if command == "read":
+        if command == "get":
             self.command_read(args)
 
             return line_index + 1
 
-        if command == "copy":
+        if command == "cpy":
             self.command_copy(args)
 
             return line_index + 1
 
-        if command == "paste":
+        if command == "pst":
             self.command_paste(args)
 
             return line_index + 1
 
-        if command == "pause":
+        if command == "pau":
             self.command_pause(args)
+
+            return line_index + 1
+
+        # ANCIENS NOMS
+        message = old_command_message(command)
+
+        if message is not None:
+            raise SysTeenError(message)
+
+        # ABREVIATIONS (:nom)
+        if command in self.abbreviations:
+
+            if args.strip():
+                raise SysTeenError(
+                    f":{command} est une abréviation : "
+                    "elle n'accepte pas d'argument."
+                )
+
+            self.run_abbreviation(command)
 
             return line_index + 1
 
@@ -4153,7 +4504,7 @@ class SysTeen:
     def command_var(self, args):
 
         if not args:
-            raise SysTeenError("Syntaxe : :var add [nom]")
+            raise SysTeenError("Syntaxe : :var add $nom")
 
         if args.strip() == "sys":
             self.command_var_sys()
@@ -4164,7 +4515,10 @@ class SysTeen:
         if parts[0] == "add":
 
             if len(parts) != 2:
-                raise SysTeenError("Syntaxe : :var add [nom]")
+                raise SysTeenError(
+                    "Syntaxe : :var add $nom "
+                    "(ou :var add !nom pour une variable permanente)"
+                )
 
             self.create_variable(parts[1])
 
@@ -4191,7 +4545,7 @@ class SysTeen:
             return
 
         raise SysTeenError(
-            "Syntaxe : :var add [nom], "
+            "Syntaxe : :var add $nom, :var add !nom, "
             ":var [nom] = [valeur], "
             ":var rm [nom] "
             "ou :var sys"
@@ -4521,14 +4875,14 @@ def main():
 
             sys.exit(0)
 
-        # Conseil de présentation des :if / :loop (non bloquant)
+        # Conseil de présentation des :if / :rep (non bloquant)
         issues = systeen.check_indentation()
 
         if issues:
             print()
             print(
                 "[SysTeen] Conseil : décalez d'un espace chaque "
-                "niveau de :if et de :loop."
+                "niveau de :if, de :rep et de :abv."
             )
 
             for _, number, text in issues[:MAX_INDENT_WARNINGS]:
