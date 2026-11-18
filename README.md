@@ -3,7 +3,7 @@
 **SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
 Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-> Version actuelle : **0.8.3**
+> Version actuelle : **0.9.0**
 > Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
@@ -18,17 +18,18 @@ Il sert à automatiser des tâches système : fichiers, variables, commandes Lin
 6. [Aide-mémoire](#aide-mémoire)
 7. [Référence des commandes](#référence-des-commandes)
 8. [Variables](#variables)
-9. [Abréviations](#abréviations)
-10. [Chemins et dossiers de travail](#chemins-et-dossiers-de-travail)
-11. [Conditions](#conditions)
-12. [Boucles](#boucles)
-13. [Erreurs et messages](#erreurs-et-messages)
-14. [Vérifier un script](#vérifier-un-script)
-15. [Mises à jour](#mises-à-jour)
-16. [Fichiers utilisés par SysTeen](#fichiers-utilisés-par-systeen)
-17. [Désinstallation](#désinstallation)
-18. [Dépannage](#dépannage)
-19. [Notes de version](#notes-de-version)
+9. [Commandes abrégées (abv)](#commandes-abrégées-abv)
+10. [Fenêtres (wui)](#fenêtres-wui)
+11. [Chemins et dossiers de travail](#chemins-et-dossiers-de-travail)
+12. [Conditions](#conditions)
+13. [Boucles](#boucles)
+14. [Erreurs et messages](#erreurs-et-messages)
+15. [Vérifier un script](#vérifier-un-script)
+16. [Mises à jour](#mises-à-jour)
+17. [Fichiers utilisés par SysTeen](#fichiers-utilisés-par-systeen)
+18. [Désinstallation](#désinstallation)
+19. [Dépannage](#dépannage)
+20. [Notes de version](#notes-de-version)
 
 ---
 
@@ -39,8 +40,9 @@ Prérequis :
 - Linux (SysTeen utilise `/proc`, `sudo` et `systemctl`)
 - Python 3
 - `gpg` (uniquement pour les mises à jour signées)
-- `sudo` (pour `:#`, `:rmf`, `:del!` et pour créer `/var/lib/systeen` au premier lancement)
+- `sudo` (uniquement pour `:#`, `:rmf` et `:del!`)
 - un terminal graphique et une session graphique X11 ou Wayland (uniquement pour `:go`)
+- `tkinter` et une session graphique (uniquement pour `:wui`) : Debian/Ubuntu `sudo apt install python3-tk`, Fedora `sudo dnf install python3-tkinter`, Arch `sudo pacman -S tk`
 
 Placez `systeen.py` dans un dossier de votre choix, puis :
 
@@ -68,20 +70,20 @@ Cela crée un lien `/usr/local/bin/systeen` vers `systeen.py`, qui **reste où i
 
 Un script SysTeen est un fichier avec l'extension **`.st`**.
 
-- La **première ligne** doit être `:sys start`.
+- La **première ligne** doit être `:systeen start`.
 - Chaque commande commence par `:`.
 - Une ligne qui commence par `#` est un commentaire.
 - Les lignes vides, et les lignes qui ne commencent pas par `:`, sont ignorées.
 
 ```
-:sys start
+:systeen start
 
 # Mon premier script
 :var add $nom
-:say? Comment tu t'appelles ? ; nom
+:say? Comment tu t'appelles ? ; $nom
 :say Bonjour $nom !
 
-:sys end
+:systeen end
 ```
 
 Lancement :
@@ -91,7 +93,7 @@ python systeen.py mon_script.st
 ```
 
 > **Important : un script recommence à la ligne 1 quand il arrive à la fin.**
-> Pour qu'il s'arrête, terminez-le par `:sys end`.
+> Pour qu'il s'arrête, terminez-le par `:systeen end`.
 
 Avant chaque lancement, SysTeen rappelle l'état de la sécurité et demande confirmation (`Y/n`). Relisez toujours le code d'un script avant de l'exécuter.
 
@@ -102,7 +104,7 @@ Avant chaque lancement, SysTeen rappelle l'état de la sécurité et demande con
 Ce script demande un dossier, affiche son nombre d'éléments, puis le copie dans `sauvegardes/` avec la date du jour et l'inscrit dans un journal :
 
 ```
-:sys start
+:systeen start
 # Sauvegarde un dossier dans sauvegardes/ avec la date du jour
 
 :var sys
@@ -111,28 +113,28 @@ Ce script demande un dossier, affiche son nombre d'éléments, puis le copie dan
 :var add $nombre
 
 :say SysTeen $sys.version - $sys.date $sys.time
-:say? Quel dossier sauvegarder ? ; dossier
+:say? Quel dossier sauvegarder ? ; $dossier
 
 :if empty $dossier
  :say Aucun dossier indiqué.
- :sys end
-:eif
+ :systeen end
+:elsend
 
-:cmd ls $dossier | wc -l ; nombre
+:cmd ls $dossier | wc -l ; $nombre
 :say $nombre élément(s) dans $dossier
 
-:yN? Lancer la sauvegarde ? ; reponse
+:sayN? Lancer la sauvegarde ? ; $reponse
 :if $reponse == y
- :cpy $dossier
- :pst sauvegardes/$dossier-$sys.date
+ :copy $dossier
+ :paste sauvegardes/$dossier-$sys.date
  :txt +sauvegardes/journal.txt "$sys.date $sys.time : $dossier sauvegardé
 "
  :say Sauvegarde terminée.
-:els
+:else
  :say Annulé.
-:eif
+:elsend
 
-:sys end
+:systeen end
 ```
 
 Vérifiez-le sans l'exécuter avec `systeen --check sauvegarde.st`, puis lancez-le.
@@ -168,15 +170,15 @@ Trois options **internes** existent aussi (`--no-confirm`, `--go-window`, `--go-
 Au premier lancement, SysTeen demande si la protection doit être activée (**oui par défaut**).
 Quand elle est active, `:del`, `:del!` et `:rmf` refusent de supprimer `/` et votre dossier personnel.
 
-Le choix est enregistré dans `/var/lib/systeen/<utilisateur>/config.json`.
+Le choix est enregistré dans `~/.config/systeen/config.json`.
 Il n'est pas définitif : `python systeen.py --change` permet de le modifier à tout moment.
 
 ### À savoir
 
-- La protection concerne `:del`, `:del!` et `:rmf`. Pour `:cmd` et `:# commande`, elle bloque aussi les `rm -r` évidents visant `/` ou votre dossier personnel (`rm -rf /`, `rm -rf ~`, `rm -rf /*`, `--no-preserve-root`…). Ce n'est **pas** une protection parfaite : une commande déguisée (script, `bash -c`, `find -delete`…) passe à travers.
+- La protection concerne `:del`, `:del!` et `:rmf`. Pour `:cmd`, elle bloque aussi les `rm -r` évidents visant `/` ou votre dossier personnel (`rm -rf /`, `rm -rf ~`, `rm -rf /*`, `--no-preserve-root`…). Ce n'est **pas** une protection parfaite : une commande déguisée (script, `bash -c`, `find -delete`…) passe à travers.
 - `:go` ne redemande **pas** de confirmation : l'avertissement `Y/n` accepté au lancement du premier script vaut pour les scripts qu'il lance. Relisez donc aussi les scripts appelés par `:go`.
-- Sous `sudo` (commande `:#`), SysTeen retrouve le vrai utilisateur grâce à `SUDO_USER` pour garder **sa** configuration de sécurité, **ses** données et **son** dossier personnel.
-- Les [abréviations](#abréviations) (`:abv`) restent enregistrées d'un lancement à l'autre : relisez aussi le contenu des scripts qui en définissent.
+- `:# commande` exécute **la commande entière** avec `sudo` (pipes et `&&` compris). Les mêmes protections que `:cmd` s'appliquent (blocage des `rm -r` évidents sur `/` ou le dossier personnel).
+- Sous `sudo` (commande `:#`), SysTeen retrouve le vrai utilisateur grâce à `SUDO_USER` pour garder **sa** configuration de sécurité et **son** dossier personnel.
 - Ne lancez jamais un script `.st` dont vous ne comprenez pas le contenu.
 
 ---
@@ -185,38 +187,40 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 
 | Syntaxe | Effet |
 |---|---|
-| `:sys start` / `:sys end` | Début (obligatoire, ligne 1) / fin du script |
-| `:#` | Relance le script en root (à mettre tout en haut) |
-| `:# commande` | Exécute **une seule** ligne de commande Linux en root |
+| `:systeen start` / `:systeen end` | Début (obligatoire, ligne 1) / fin du script |
+| `:#` | Relance **tout le script** en root (à mettre tout en haut) |
+| `:# commande [; $variable]` | Exécute **une commande** avec sudo, sans relancer le script |
 | `:v` / `:v 0.7.2` | Met à jour SysTeen / installe une version précise |
-| `:var add $nom` | Crée une variable (valeur `X`) |
-| `:var add !nom` | Crée une variable **permanente** (gardée entre deux lancements) |
-| `:var nom = valeur` | Change la valeur |
-| `:var rm nom` | Supprime la variable |
+| `:var add $nom` | Crée une variable **temporaire** (valeur `X`) |
+| `:var add !nom` | Crée une variable **permanente** (enregistrée automatiquement) |
+| `:var $nom = valeur` / `:var !nom = valeur` | Change la valeur |
+| `:var rm $nom` / `:var rm !nom` | Supprime la variable |
 | `:var sys` | Crée les variables `$sys.…` |
-| `:abv nom {` ... `}` | Crée une abréviation (un raccourci : ensuite `:nom`) |
 | `:say texte` | Affiche du texte |
-| `:syr texte` | Remplace la dernière ligne affichée |
-| `:say? question ; variable` | Pose une question |
-| `:yn? question ; variable` | Question y/n, Entrée = y |
-| `:yN? question ; variable` | Question y/n, Entrée = n |
-| `:cal expression [; variable]` | Calcule |
-| `:cmd commande [; variable]` | Exécute une commande Linux (et garde son résultat) |
-| `:pau [message]` | Attend la touche Entrée |
-| `:run programme` / `:kil programme` | Lance / arrête un programme |
+| `:sayr texte` | Remplace la dernière ligne affichée |
+| `:say? question ; $variable` | Pose une question |
+| `:sayn? question ; $variable` | Question y/n, Entrée = y |
+| `:sayN? question ; $variable` | Question y/n, Entrée = n |
+| `:math expression [; $variable]` | Calcule |
+| `:cmd commande [; $variable]` | Exécute une commande Linux (et garde son résultat) |
+| `:pause [message]` | Attend la touche Entrée |
+| `:run programme` / `:stop programme` | Lance / arrête un programme |
 | `:go script.st` | Lance un autre script dans une nouvelle fenêtre |
 | `:cd dossier` | Change de dossier |
 | `:add nom` | Crée un fichier (avec extension) ou un dossier |
 | `:txt fichier "texte"` / `:txt +fichier "texte"` | Écrit / ajoute du texte dans un fichier |
-| `:get fichier ; variable` | Lit un fichier dans une variable |
-| `:cpy chemin` puis `:pst destination` | Copie un fichier ou un dossier |
+| `:read fichier ; $variable` | Lit un fichier dans une variable |
+| `:copy chemin` puis `:paste destination` | Copie un fichier ou un dossier |
+| `:wui "titre" {` ... `}` | Ouvre une fenêtre (texte et boutons) |
+| `:abv nom {` ... `}` | Crée une commande abrégée `:nom` (enregistrée pour tous les scripts) |
+| `:abv rm nom` | Supprime une commande abrégée |
 | `:del chemin` / `:del! chemin` / `:rmf chemin` | Supprime (normal / avec sudo si refusé / sudo direct) |
-| `:wai nombre unité` | Pause (`sec`, `min`, `h`, `j`, `y`) |
+| `:tmp nombre unité` | Pause (`sec`, `min`, `h`, `j`, `y`) |
 | `:re` / `:off` | Redémarre / éteint l'ordinateur |
-| `:if condition` ... `:if+ condition` ... `:els` ... `:eif` | Condition (`:if+` = « sinon si ») |
-| `:rep N :commande` | Répète une commande N fois (ou `inf`) |
-| `:rep N` ... `:erp` | Répète un bloc N fois (ou `inf`) |
-| `:rep L5-3` | Retourne 3 fois à la ligne 5 |
+| `:if condition` ... `:else` ... `:elsend` | Condition |
+| `:loop N :commande` | Répète une commande N fois (ou `inf`) |
+| `:loop N` ... `:loopend` | Répète un bloc N fois (ou `inf`) |
+| `:loop L5-3` | Retourne 3 fois à la ligne 5 |
 | `# texte` | Commentaire |
 
 ---
@@ -227,47 +231,47 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 
 | Commande | Description |
 |---|---|
-| `:sys start` | Obligatoire en première ligne |
-| `:sys end` | Arrête le script et sauvegarde les variables permanentes |
+| `:systeen start` | Obligatoire en première ligne |
+| `:systeen end` | Arrête le script (les variables permanentes sont déjà enregistrées) |
 
 ### Affichage et saisie
 
 | Commande | Description |
 |---|---|
 | `:say texte` | Affiche un texte (les `$variables` sont remplacées) |
-| `:syr texte` | **Remplace la dernière ligne affichée** par ce texte (chargements, compteurs…) |
-| `:say? question ; variable` | Pose une question et stocke la réponse dans une variable **déjà créée** |
-| `:yn? question ; variable` | Question à réponse `y` ou `n` uniquement, affichée `(Y/n)` : **Entrée = y** |
-| `:yN? question ; variable` | Pareil, affichée `(y/N)` : **Entrée = n** (choix recommandé pour les actions risquées) |
+| `:sayr texte` | **Remplace la dernière ligne affichée** par ce texte (chargements, compteurs…) |
+| `:say? question ; $variable` | Pose une question et stocke la réponse dans une variable **déjà créée** |
+| `:sayn? question ; $variable` | Question à réponse `y` ou `n` uniquement, affichée `(Y/n)` : **Entrée = y** |
+| `:sayN? question ; $variable` | Pareil, affichée `(y/N)` : **Entrée = n** (choix recommandé pour les actions risquées) |
 
-Exemple de chargement avec `:syr` :
+Exemple de chargement avec `:sayr` :
 
 ```
 :say Chargement : 0%
-:wai 1 sec
-:syr Chargement : 50%
-:wai 1 sec
-:syr Chargement : 100% terminé !
+:tmp 1 sec
+:sayr Chargement : 50%
+:tmp 1 sec
+:sayr Chargement : 100% terminé !
 ```
 
-- `:syr` efface la ligne juste au-dessus du curseur (la dernière chose affichée, par `:say`, `:cmd`, un message SysTeen…) et la remplace. Plusieurs `:syr` d'affilée se remplacent l'un l'autre.
-- Il peut s'utiliser en boucle : `:rep 5 :syr Patientez...`
-- Il n'existe **pas** de `:syr?` : une question attend une réponse au clavier, elle ne peut donc pas remplacer une ligne.
+- `:sayr` efface la ligne juste au-dessus du curseur (la dernière chose affichée, par `:say`, `:cmd`, un message SysTeen…) et la remplace. Plusieurs `:sayr` d'affilée se remplacent l'un l'autre.
+- Il peut s'utiliser en boucle : `:loop 5 :sayr Patientez...`
+- Il n'existe **pas** de `:sayr?`, `:saynr?` ni `:sayNr?` : une question attend une réponse au clavier, elle ne peut donc pas remplacer une ligne.
 - Il faut un vrai terminal. Si la sortie est redirigée vers un fichier ou un tube (`systeen script.st > sortie.txt`), le texte est simplement ajouté à la suite.
-- Une ligne plus longue que la largeur du terminal (qui passe à la ligne) n'est remplacée que sur sa dernière ligne d'écran : gardez les textes de `:syr` courts.
+- Une ligne plus longue que la largeur du terminal (qui passe à la ligne) n'est remplacée que sur sa dernière ligne d'écran : gardez les textes de `:sayr` courts.
 
-Avec `:yn?` et `:yN?`, la variable reçoit `y` ou `n`, ce qui se teste avec `:if $variable == y`. Toute autre réponse est refusée et la question est reposée.
+Avec `:sayn?` et `:sayN?`, la variable reçoit `y` ou `n`, ce qui se teste avec `:if $variable == y`. Toute autre réponse est refusée et la question est reposée.
 
 Pour les trois commandes de question, le **dernier** `;` de la ligne sépare la question de la variable : la question peut donc elle-même contenir des `;`.
 
 ### Calcul
 
 ```
-:cal 2 + 3 * 4
-:cal $a * 2 ; resultat
+:math 2 + 3 * 4
+:math $a * 2 ; $resultat
 ```
 
-Opérateurs : `+ - * / // % **` (et `+`/`-` unaires). Sans `; variable`, le résultat est affiché.
+Opérateurs : `+ - * / // % **` (et `+`/`-` unaires). Sans `; $variable`, le résultat est affiché.
 L'expression est évaluée de façon sûre : aucun code Python arbitraire n'est exécuté.
 
 ### Fichiers et dossiers
@@ -277,9 +281,9 @@ L'expression est évaluée de façon sûre : aucun code Python arbitraire n'est 
 | `:add nom` | Crée un fichier si `nom` a une extension (`notes.txt`), sinon un dossier. Crée aussi les dossiers parents. Erreur si l'élément existe déjà |
 | `:txt fichier "texte"` | Écrit le texte dans le fichier (écrase le contenu). Le texte peut s'étendre sur plusieurs lignes, jusqu'au guillemet fermant |
 | `:txt +fichier "texte"` | Ajoute le texte **à la fin** du fichier (le crée s'il n'existe pas) |
-| `:get fichier ; variable` | Lit un fichier texte dans une variable **déjà créée** (le retour à la ligne final est retiré, 10 Mo maximum) |
-| `:cpy chemin` | Mémorise un fichier ou un dossier (comme « copier ») |
-| `:pst destination` | Colle l'élément mémorisé par `:cpy` (comme « coller ») |
+| `:read fichier ; $variable` | Lit un fichier texte dans une variable **déjà créée** (le retour à la ligne final est retiré, 10 Mo maximum) |
+| `:copy chemin` | Mémorise un fichier ou un dossier (comme « copier ») |
+| `:paste destination` | Colle l'élément mémorisé par `:copy` (comme « coller ») |
 | `:del chemin` | Supprime un fichier ou un dossier |
 | `:del! chemin` | Comme `:del`, avec une nouvelle tentative via `sudo` si l'accès est refusé |
 | `:rmf chemin` | Supprime directement avec `sudo rm -rf` |
@@ -294,17 +298,18 @@ Ligne 3"
 ```
 
 > Le texte d'un `:txt` ne peut pas contenir de guillemet `"`.
+> L'ancienne commande `:crea` a été renommée `:add`, `:edit` est devenue `:txt` et `:wait` est devenue `:tmp`.
 
-Exemple de `:cpy` / `:pst` :
+Exemple de `:copy` / `:paste` :
 
 ```
-:cpy rapport.txt
-:pst sauvegardes/            # dossier : collé dedans, même nom
-:pst rapport_v2.txt          # sinon : nouveau nom complet
+:copy rapport.txt
+:paste sauvegardes/            # dossier : collé dedans, même nom
+:paste rapport_v2.txt          # sinon : nouveau nom complet
 ```
 
 - Si la destination est un dossier existant (ou se termine par `/`), l'élément est collé **dedans** avec son nom d'origine. Sinon la destination est le nouveau chemin complet.
-- Un même `:cpy` peut être collé plusieurs fois.
+- Un même `:copy` peut être collé plusieurs fois.
 - Rien n'est jamais écrasé : si la destination existe, c'est une erreur.
 - Les dossiers sont copiés avec tout leur contenu (mais pas dans eux-mêmes).
 
@@ -313,12 +318,11 @@ Exemple de `:cpy` / `:pst` :
 | Commande | Description |
 |---|---|
 | `:cmd commande` | Exécute une commande Linux dans le terminal |
-| `:cmd commande ; variable` | Exécute la commande et met son **résultat** dans une variable **déjà créée** (le retour à la ligne final est retiré) |
-| `:# commande` | Comme `:cmd`, mais **en root** (via `sudo`) : une seule ligne, le script continue ensuite normalement |
-| `:pau` / `:pau message` | Attend que l'utilisateur appuie sur Entrée |
+| `:cmd commande ; $variable` | Exécute la commande et met son **résultat** dans une variable **déjà créée** (le retour à la ligne final est retiré) |
+| `:pause` / `:pause message` | Attend que l'utilisateur appuie sur Entrée |
 | `:run programme` | Lance un programme en arrière-plan |
-| `:kil programme` | Arrête un programme par son nom (`pkill -x`) |
-| `:wai nombre unité` | Pause. Unités : `sec`, `min`, `h`, `j`, `y` |
+| `:stop programme` | Arrête un programme par son nom (`pkill -x`) |
+| `:tmp nombre unité` | Pause. Unités : `sec`, `min`, `h`, `j`, `y` |
 | `:re` | Redémarre l'ordinateur |
 | `:off` | Éteint l'ordinateur |
 
@@ -326,7 +330,7 @@ Exemple de capture :
 
 ```
 :var add $nom
-:cmd whoami ; nom
+:cmd whoami ; $nom
 :say Connecté en tant que $nom
 ```
 
@@ -354,41 +358,42 @@ Si la variable d'environnement `TERMINAL` désigne l'un d'eux, il passe en premi
 
 Sans session graphique (SSH, console pure) ou sans terminal installé, `:go` affiche une erreur claire et ne lance rien.
 
-### `:#` : le mode root
+### `:#` : sudo, pour une commande ou pour tout le script
 
-`:#` a deux formes.
-
-**1. Seul sur sa ligne : relancer tout le script en root**
+**`:# commande`** exécute une seule commande avec `sudo`, **sans relancer le script** :
 
 ```
-:sys start
+:# apt update
+:# systemctl restart nginx
+:var add $liste
+:# ls /root ; $liste
+```
+
+- La commande entière tourne avec `sudo` (`sudo sh -c "…"`) : `:# apt update && apt upgrade -y` fonctionne en entier avec les droits root.
+- `; $variable` garde le résultat, comme avec `:cmd`.
+- Le mot de passe est demandé par `sudo` (ou pas, selon votre configuration).
+- Si vous êtes déjà root, la commande est exécutée directement.
+
+**`:#` seul**, sur une ligne, relance **tout le script** en root :
+
+```
+:systeen start
 :#
 :say Je suis root !
-:sys end
+:systeen end
 ```
 
-`:#` fait, dans l'ordre :
+Dans l'ordre :
 
 1. `cd` vers le dossier où se trouve `systeen.py` (retrouvé automatiquement) ;
 2. `sudo python systeen.py <ce script>` ;
 3. arrête le script actuel dès que `sudo` démarre.
 
-Il ne reste plus qu'à saisir le mot de passe root.
+Il ne reste plus qu'à saisir le mot de passe root. À savoir :
 
-À savoir :
-
-- Le script **repart depuis la première ligne** en root. Placez donc `:#` **tout en haut**, juste après `:sys start`, sinon les lignes précédentes seront exécutées deux fois.
+- Le script **repart depuis la première ligne** en root. Placez donc `:#` **tout en haut**, juste après `:systeen start`, sinon les lignes précédentes seront exécutées deux fois.
 - Si vous êtes déjà root, `:#` est ignoré (pas de boucle infinie).
-- Les variables permanentes (`!`) sont écrites avant le passage en root.
-
-**2. Suivi d'une commande : une seule ligne en root**
-
-```
-:# apt update
-:# cat /etc/shadow | wc -l ; nombre
-```
-
-La commande est exécutée avec `sudo`, **seulement pour cette ligne** : le reste du script continue avec vos droits normaux. Comme `:cmd`, elle accepte `; variable` pour garder le résultat, les `$variables` sont remplacées (`$$` pour un `$` du shell) et les `rm -r` évidents sur `/` ou le dossier personnel sont bloqués quand la protection est active. Si vous êtes déjà root, la commande est simplement exécutée.
+- Les variables permanentes (`!nom`) sont déjà enregistrées, et retrouvées en root.
 
 ### Mise à jour depuis un script
 
@@ -401,41 +406,31 @@ La commande est exécutée avec `sudo`, **seulement pour cette ligne** : le rest
 
 ## Variables
 
+SysTeen a deux sortes de variables, qu'on distingue par leur signe :
+
+| | Temporaire | Permanente |
+|---|---|---|
+| Créer | `:var add $nom` | `:var add !nom` |
+| Utiliser | `$nom` ou `${nom}` | `!nom` ou `!{nom}` |
+| Durée de vie | jusqu'à la fin du script | **enregistrée automatiquement**, retrouvée au prochain lancement |
+
 | Commande | Description |
 |---|---|
-| `:var add $nom` | Crée une variable (valeur initiale : `X`) |
-| `:var add !nom` | Crée une variable **permanente** : elle est sauvegardée et retrouvée au prochain lancement |
-| `:var nom = valeur` | Modifie une variable existante |
-| `:var rm nom` | Supprime une variable (et sa sauvegarde si elle était permanente) |
+| `:var add $nom` | Crée une variable **temporaire** (valeur initiale : `X`) |
+| `:var add !nom` | Crée une variable **permanente**. Si elle existe déjà, elle est conservée telle quelle |
+| `:var $nom = valeur` / `:var !nom = valeur` | Modifie une variable existante |
+| `:var rm $nom` / `:var rm !nom` | Supprime une variable (la suppression d'une permanente est enregistrée) |
 | `:var sys` | Crée les variables système (voir plus bas) |
 
-Pour **créer** une variable, on écrit le symbole directement devant le nom : `$` pour une variable normale, `!` pour une variable permanente. Les crochets des syntaxes de ce document (`[nom]`, `[variable]`) indiquent seulement où mettre une valeur : ils ne s'écrivent pas.
+> La commande `:save` n'existe plus : une variable est permanente dès qu'elle est créée avec `!`.
 
-Ensuite, on utilise la variable avec `$`, dans les deux cas : `:say Bonjour $nom`.
-Un nom de variable peut contenir lettres, chiffres, `_` et `.`, et peut **commencer par un chiffre** (`:var add $1` puis `$1` ou `${1}`). `:var add` refuse tout autre nom (crochets, `$`, `-`, espaces…), car on ne pourrait jamais l'écrire ensuite avec `$nom`.
-Comme le point fait partie du nom, `$nom.txt` cherche la variable `nom.txt` : écrivez **`${nom}.txt`** pour délimiter le nom.
-Utiliser une variable qui n'existe pas affiche une erreur `Variable-404`.
-
-### Variables permanentes (`!`)
-
-```
-:sys start
-:if not exist $visites
- :var add !visites
- :var visites = 0
-:eif
-:cal $visites + 1 ; visites
-:say Lancement numéro $visites
-:sys end
-```
-
-- Les variables permanentes sont écrites dans le dossier de données de l'utilisateur, `/var/lib/systeen/<utilisateur>/`, dans un fichier `.vars` propre à chaque script (nom du script + empreinte de son chemin). Elles sont rechargées automatiquement.
-- La valeur est enregistrée à la fin du script (`:sys end`, `Ctrl + C` ou fin normale) et aussi à la création.
-- `:var add !nom` sur une variable permanente **déjà rechargée** ne fait rien (pas d'erreur « existe déjà »). Pour savoir si elle vient d'être créée, testez avant avec `:if not exist $nom`, comme ci-dessus.
-- Il n'y a plus de commande `:save` : c'est le `!` à la création qui rend une variable permanente.
-- `:var rm nom` supprime aussi la sauvegarde. Les fichiers `.vars` sont supprimés par `--uninstall`.
-
-> Dans un `:if`, `exist $nom` teste **la variable**, pas un chemin qu'elle contiendrait.
+- **Le signe est obligatoire, partout et tout le temps** : à la création (`:var add $nom`), à la modification (`:var $nom = …`), à la suppression (`:var rm $nom`), après un `;` et dans les textes. Un nom tout seul (`:var add nom`, `; nom`, `:var rm nom`) est toujours une erreur, qui indique le signe à écrire : c'est ce qui permet de distinguer `$nom` de `!nom` sans jamais hésiter.
+- Un nom peut contenir lettres, chiffres, `_` et `.`, et peut **commencer par un chiffre** (`:var add $1` puis `$1` ou `${1}`). `:var add` refuse tout autre nom (crochets, `-`, espaces…), car on ne pourrait jamais l'écrire ensuite.
+- `$nom` et `!nom` sont **deux variables distinctes** : on peut avoir les deux. Se tromper de signe donne une erreur qui indique le bon (« Elle existe en permanente : écrivez !nom »).
+- Les commandes qui prennent une variable après un `;` (`:say?`, `:sayn?`, `:sayN?`, `:math`, `:cmd`, `:read`) veulent elle aussi **le signe** : `; $nom` ou `; !nom`.
+- Comme le point fait partie du nom, `$nom.txt` cherche la variable `nom.txt` : écrivez **`${nom}.txt`** (ou `!{nom}.txt`) pour délimiter le nom.
+- Les crochets des syntaxes de ce document (`[nom]`, `[variable]`) indiquent seulement où mettre une valeur : ils ne s'écrivent pas. On écrit `$nom`, pas `$[nom]`.
+- Utiliser une variable qui n'existe pas affiche une erreur `Variable-404`.
 
 ### Variables système (`:var sys`)
 
@@ -466,60 +461,143 @@ Ces valeurs sont lues au moment où `:var sys` s'exécute. Relancez `:var sys` p
 
 ### Valeurs : texte et nombres
 
-- Une variable contient du texte. `:var nom = 3` stocke `3`, et `:say? ...` stocke ce que la personne tape.
-- `:cal` stocke un nombre (`7 / 2` donne `3.5`).
+- Une variable contient du texte. `:var $nom = 3` stocke `3`, et `:say? ...` stocke ce que la personne tape.
+- `:math` stocke un nombre (`7 / 2` donne `3.5`).
 - Dans une condition, si les deux côtés sont des nombres ils sont comparés comme des nombres, sinon comme du texte. Comparer un nombre et un texte avec `<` ou `>` donne l'erreur « Impossible de comparer ces valeurs ».
 
-### Où le `$` est remplacé
+### Où le `$` et le `!` sont remplacés
 
-SysTeen remplace `$nom` (ou `${nom}`) dans : `:say`, la question de `:say?` / `:yn?` / `:yN?`, `:cal`, `:cmd`, `:#` (avec commande), `:run`, `:kil`, `:go`, `:cd`, `:add`, `:txt` (nom et texte), `:get`, `:cpy`, `:pst`, `:pau`, `:del`, `:del!`, `:rmf`, la valeur de `:var nom = valeur` et les conditions de `:if` / `:if+`.
+SysTeen remplace `$nom` / `${nom}` et `!nom` / `!{nom}` dans : `:say`, `:sayr`, la question de `:say?` / `:sayn?` / `:sayN?`, `:math`, `:cmd`, `:#`, `:run`, `:stop`, `:go`, `:cd`, `:add`, `:txt` (nom et texte), `:read`, `:copy`, `:paste`, `:pause`, `:del`, `:del!`, `:rmf`, la valeur de `:var nom = valeur` et les conditions de `:if`.
 
-Il n'est **pas** remplacé dans `:wai`, `:v`, ni pour les noms de variables eux-mêmes (`:var add $nom`, la variable après un `;`).
+Il n'est **pas** remplacé dans `:tmp`, `:v`, ni pour les noms de variables eux-mêmes (`:var add $nom`, la variable après un `;`).
 
-> **Attention avec `:cmd` et `:#` :** SysTeen remplace les `$nom` **avant** d'envoyer la commande au shell. Une variable du shell comme `$HOME` provoque donc une erreur `Variable-404`. Doublez le `$` pour que le shell la reçoive : `:cmd echo $$HOME`. (`~` fonctionne aussi pour le dossier personnel.)
+### Écrire un `$` ou un `!` littéral
 
-### Écrire un `$` littéral : `$$`
+Un `$` ou un `!` n'est une variable que **si un nom le suit directement**. Sinon (rien derrière, un espace, une ponctuation, `=`…), c'est un caractère normal, sans rien à doubler :
 
-`$$` donne un `$` simple, sans remplacement :
+```
+:say Bonjour !
+:say Ça coûte 5 $
+:say a != b
+```
+
+Quand un nom suit **vraiment** le caractère et que vous voulez le garder tel quel, doublez-le : `$$` donne `$` et `!!` donne `!`.
 
 ```
 :say Ça coûte $$5
+:say C'est !!important
 :cmd echo $$HOME
 ```
 
-Sans le doublement, `$5` est lu comme la variable `5` et provoque une erreur `Variable-404` si elle n'existe pas.
+> **Attention avec `:cmd` :** SysTeen remplace les `$nom` **avant** d'envoyer la commande au shell. Une variable du shell comme `$HOME` provoque donc une erreur `Variable-404`. Doublez le `$` pour que le shell la reçoive : `:cmd echo $$HOME` (ou utilisez `~` pour le dossier personnel).
+>
+> Attention aussi à `Bonjour!Alice` : le `!` est collé à un nom, c'est donc la variable permanente `Alice`.
+
+### Variables permanentes
+
+Une variable créée avec `!` est **enregistrée à chaque modification** (pas seulement à la fin du script) : elle survit même si le script est interrompu.
+
+```
+:systeen start
+:var add !visites
+:if !visites == X
+ :var !visites = 0
+:elsend
+:math !visites + 1 ; !visites
+:say Lancement numéro !visites
+:systeen end
+```
+
+- **Elles sont propres à chaque script.** Le fichier est `~/.local/share/systeen/vars/<nom du script>-<empreinte>.vars`. L'empreinte vient du chemin complet du script : renommer ou déplacer un script le sépare de ses variables. Un script lancé par `:go` a les siennes.
+- `:var add !nom` ne réinitialise jamais une variable déjà existante : écrivez la valeur de départ avec un `:if` comme ci-dessus.
+- Les valeurs sont du texte ou des nombres. Le fichier est lisible (JSON), avec les droits `600`.
+- Le dossier suit le standard XDG : `$XDG_DATA_HOME/systeen` si cette variable est définie, sinon `~/.local/share/systeen`.
+- Les fichiers `.vars` sont supprimés par `--uninstall`.
+
+> Dans un `:if`, `exist $nom` / `exist !nom` teste **la variable**, pas un chemin qu'elle contiendrait.
 
 ---
 
-## Abréviations
+## Commandes abrégées (abv)
 
-Une **abréviation** est un raccourci : vous donnez un nom à une suite de commandes, puis vous l'appelez avec `:nom`.
+`:abv` crée vos propres commandes, enregistrées pour **tous** vos scripts :
 
 ```
-:abv bonjour {
- :say Bonjour $nom !
- :say Nous sommes le $sys.date
+:abv sauve {
+ :copy $dossier
+ :paste sauvegardes/$dossier-$sys.date
+ :say Sauvegarde de $dossier terminée.
 }
-
-:var sys
-:var add $nom
-:var nom = Alice
-:bonjour
 ```
 
-- Syntaxe : `:abv nom {` sur la première ligne, les commandes ensuite, puis `}` **seul sur sa ligne**.
-- Le nom commence par une lettre et peut contenir lettres, chiffres et `_`. Il ne peut pas être celui d'une commande existante (`:say`, `:if`, `:rep`…).
-- Appeler `:nom` exécute les commandes du raccourci, à cet endroit du script. Il n'accepte pas d'argument.
-- Le raccourci utilise **les variables du script qui l'appelle** : elles doivent exister à ce moment-là.
-- Le corps peut contenir n'importe quelles commandes (`:if`, `:rep`, `:txt` sur plusieurs lignes…), y compris l'appel d'une autre abréviation (10 niveaux maximum). `:sys end` dans une abréviation arrête tout le script.
-- Les commandes du corps ne sont **pas** exécutées à l'endroit du `:abv` : la définition ne fait que créer le raccourci.
-- Indentez le corps d'un espace, comme pour `:if` (simple conseil, non bloquant).
+À partir de là, `:sauve` exécute ces lignes, dans ce script comme dans n'importe quel autre, aux lancements suivants :
 
-### Où sont-elles enregistrées ?
+```
+:var sys
+:var add $dossier
+:var $dossier = projet
+:sauve
+```
 
-Chaque abréviation est écrite dans un fichier `nom.csys` dans `/var/lib/systeen/<utilisateur>/abv/`. Elle est donc **retrouvée à chaque lancement et dans tous vos scripts**, même sans la redéfinir. Si un script redéfinit un `:abv` existant, le fichier est mis à jour.
+| Syntaxe | Effet |
+|---|---|
+| `:abv nom {` ... `}` | Crée (ou **remplace**) la commande `:nom` |
+| `:abv rm nom` | Supprime la commande `:nom` |
 
-Pour supprimer une abréviation, effacez son fichier `.csys` (ou faites `--uninstall` pour tout retirer).
+- Le `}` doit être **seul sur sa ligne**. Les lignes d'entre les deux sont des commandes SysTeen normales (`:if`, `:loop`, `:cmd`…). Décalez-les d'un espace, comme pour les `:if`.
+- Le nom contient lettres, chiffres et `_`. Il ne peut pas être celui d'une commande existante (`:say`, `:go`…), ni `rm`.
+- La commande est créée au moment où la ligne `:abv … {` s'exécute (pas si elle est dans un `:if` faux).
+- La commande abrégée travaille **dans le script qui l'appelle** : elle voit ses variables temporaires et permanentes, ses `:copy`, son dossier courant…
+- Elle n'accepte pas d'argument. Passez les valeurs par des variables.
+- En cas d'erreur, le message indique la ligne **et** la commande : `Erreur ligne 2 de :sauve : …`.
+- `:systeen end` dans une commande abrégée arrête tout le script.
+- Une commande abrégée peut en appeler d'autres (10 niveaux au maximum).
+- `--check` connaît les commandes déjà créées et celles définies plus haut dans le script.
+- Chaque commande est un fichier lisible `~/.local/share/systeen/commands/<nom>.scmd` (le corps tel que vous l'avez écrit). Elles sont supprimées par `--uninstall`.
+
+---
+
+## Fenêtres (wui)
+
+`:wui` ouvre une vraie fenêtre graphique, la remplit de texte et de boutons, puis **attend qu'elle soit fermée** :
+
+```
+:systeen start
+:var add $nom
+:var add !choix
+:var $nom = Alice
+:wui "Ma fenêtre" {
+ '300/500'
+ 'Color:red'
+ 'Size:16'
+ ~Bonjour $nom
+ ~Une deuxième ligne
+ 'Color:blue'
+ ~Une ligne en bleu
+ B~ oui/non/others ; !choix
+}
+:say Vous avez choisi : !choix
+:systeen end
+```
+
+| Ligne du bloc | Effet |
+|---|---|
+| `:wui "titre" {` | Ouvre le bloc. Le titre devient celui de la fenêtre (les variables y sont remplacées) |
+| `'hauteur/largeur'` | Taille de la fenêtre en pixels : `'300/500'` = 300 de haut, 500 de large (de 50 à 5000). Par défaut `300/400`. Si plusieurs lignes en donnent une, la dernière compte |
+| `'Color:couleur'` | Couleur du texte et des boutons **qui suivent** : un nom anglais (`red`, `blue`, `darkgreen`…) ou un code `#rrggbb`. `'Couleur:…'` fonctionne aussi |
+| `'Size:taille'` | Taille du texte et des boutons **qui suivent**, de 1 à 200 (par défaut 12). `'Taille:…'` fonctionne aussi |
+| `~texte` | Une ligne de texte (le `~` est obligatoire). `$nom` et `!nom` y sont remplacés. `~` seul donne une ligne vide |
+| `B~ oui/non/others ; $variable` | Une rangée de boutons, un par mot séparé par `/`. Le clic met le texte du bouton dans la variable et **ferme la fenêtre** |
+| `}` | Ferme le bloc (seul sur sa ligne) |
+
+- **Les paramètres changent en cours de route** : `'Color:…'` et `'Size:…'` s'appliquent à tout ce qui est écrit ensuite, jusqu'au prochain changement. Dans l'exemple, les deux premiers textes sont rouges et le reste est bleu.
+- **La variable d'un bouton** est écrite comme partout, avec son signe (`$nom` ou `!nom`), et doit déjà exister. Avec une variable permanente (`!nom`), le choix est même retrouvé au lancement suivant.
+- **Fermer la fenêtre avec la croix**, sans cliquer sur un bouton, ne modifie aucune variable.
+- **Avec plusieurs rangées `B~`**, un clic sur n'importe quel bouton ferme la fenêtre, et seule la variable du bouton cliqué est modifiée.
+- **Tout est vérifié avant l'ouverture** (variables, couleur). En cas d'erreur, aucune fenêtre n'apparaît et le script continue après le `}`.
+- Les lignes vides et celles qui commencent par `#` sont ignorées. Les lignes du bloc ne sont pas des commandes (pas de `:` devant) : décalez-les d'un espace, comme dans les autres blocs. Un texte trop long passe à la ligne automatiquement.
+- Il faut `tkinter` et une session graphique (voir [Installation](#installation)). Sans eux, `:wui` affiche une erreur claire, saute le bloc et le script continue.
+- `--check` vérifie les blocs `:wui` (lignes non reconnues, dimensions, variables, `}` manquant).
 
 ---
 
@@ -527,14 +605,14 @@ Pour supprimer une abréviation, effacez son fichier `.csys` (ou faites `--unins
 
 | Commande | Un chemin relatif part de… |
 |---|---|
-| `:add`, `:txt`, `:get`, `:cpy`, `:pst`, `:del`, `:del!`, `:rmf`, `:cd` | le **dossier courant** (celui d'où vous avez lancé SysTeen, modifié par `:cd`) |
+| `:add`, `:txt`, `:read`, `:copy`, `:paste`, `:del`, `:del!`, `:rmf`, `:cd` | le **dossier courant** (celui d'où vous avez lancé SysTeen, modifié par `:cd`) |
 | `:go` et `exist chemin` dans un `:if` | le **dossier du script** |
-| fichiers `.vars` et `.csys` | `/var/lib/systeen/<utilisateur>/` |
+| fichier `.vars` (variables permanentes) | `~/.local/share/systeen/vars/`, pas à côté du script |
 
 - `~` est remplacé par votre dossier personnel.
 - Un chemin absolu (`/home/user/...`) fonctionne partout.
 - `$sys.cwd` donne le dossier courant et `$sys.script` le chemin du script.
-- `:cmd`, `:#` (avec commande) et `:run` sont exécutés dans le dossier courant.
+- `:cmd` et `:run` sont exécutés dans le dossier courant.
 
 ---
 
@@ -543,69 +621,47 @@ Pour supprimer une abréviation, effacez son fichier `.csys` (ou faites `--unins
 ```
 :if $age >= 18
  :say Majeur
-:els
+:else
  :say Mineur
-:eif
+:elsend
 ```
-
-### Plusieurs cas : `:if+`
-
-`:if+` est le « sinon si » : il se place entre le `:if` et le `:els`, autant de fois que voulu. Les conditions sont testées dans l'ordre et **seule la première branche vraie** est exécutée.
-
-```
-:if $note >= 16
- :say Très bien
-:if+ $note >= 12
- :say Bien
-:if+ $note >= 10
- :say Passable
-:els
- :say Insuffisant
-:eif
-```
-
-- `:if+` s'écrit avec les mêmes conditions que `:if` (`and`, `or`, `exist`, `contains`…).
-- Un seul `:eif` ferme l'ensemble.
-- `:els` reste facultatif, mais doit être **en dernier** : un `:if+` après un `:els` est une erreur.
 
 ### Combiner des conditions : `and` / `or`
 
 ```
 :if $age >= 18 and $pays == FR
  :say Majeur en France
-:eif
+:elsend
 
 :if $a == 1 or exist fichier.txt
  :say a vaut 1, ou le fichier existe
-:eif
+:elsend
 ```
 
 `and` passe avant `or`. Un `and`/`or` n'est reconnu que s'il est suivi d'une vraie condition (`$variable`, `exist`, `empty`, `notempty`) : `:if $texte contains rock and roll` fonctionne donc comme avant.
 
 ### Présentation conseillée : 1 espace de plus par niveau
 
-Pour se repérer facilement, décalez d'un espace tout ce qui se trouve dans un `:if`, et encore d'un espace pour chaque `:if` imbriqué. Le `:if+`, le `:els` et le `:eif` se placent au niveau de leur `:if`.
+Pour se repérer facilement, décalez d'un espace tout ce qui se trouve dans un `:if`, et encore d'un espace pour chaque `:if` imbriqué. Le `:elsend` se place au niveau de son `:if`.
 
 ```
 :if $a == 1
  :say a vaut 1
  :if $b == 2
   :say et b vaut 2
- :els
+ :else
   :say mais b ne vaut pas 2
- :eif
-:if+ $a == 2
- :say a vaut 2
-:els
- :say a ne vaut ni 1 ni 2
-:eif
+ :elsend
+:else
+ :say a ne vaut pas 1
+:elsend
 ```
 
-Au lancement, SysTeen signale les lignes mal décalées (ou un `:eif` / `:erp` / `}` oublié) avec leur numéro. Ce n'est qu'un **conseil** : le script s'exécute normalement. La même présentation s'applique aux boucles en bloc et aux abréviations.
+Au lancement, SysTeen signale les lignes mal décalées (ou un `:elsend` / `:loopend` oublié) avec leur numéro. Ce n'est qu'un **conseil** : le script s'exécute normalement. La même présentation s'applique aux boucles en bloc.
 
-Chaque `:if` doit se terminer par un `:eif`. Le `:els` est facultatif. Les `:if` peuvent être imbriqués.
+Chaque `:if` doit se terminer par un `:elsend`. Le `:else` est facultatif. Les `:if` peuvent être imbriqués.
 
-À gauche d'une condition, il faut toujours une **variable** (sauf pour `exist`).
+À gauche d'une condition, il faut toujours une **variable** : `$nom` ou `!nom` (sauf pour `exist chemin`). Les exemples ci-dessous utilisent `$`, mais `!` fonctionne partout de la même façon.
 
 | Condition | Vrai quand… |
 |---|---|
@@ -628,35 +684,35 @@ Chaque `:if` doit se terminer par un `:eif`. Le `:els` est facultatif. Les `:if`
 ### Répéter une commande
 
 ```
-:rep 3 :say Salut
-:rep inf :say Ça tourne...
+:loop 3 :say Salut
+:loop inf :say Ça tourne...
 ```
 
-Commandes acceptées dans cette forme : `:say`, `:syr`, `:cmd`, `:cal`, `:wai`, `:run`, `:kil`, `:go`.
+Commandes acceptées dans cette forme : `:say`, `:sayr`, `:cmd`, `:math`, `:tmp`, `:run`, `:stop`, `:go`.
 
-### Répéter plusieurs lignes : `:rep N` ... `:erp`
+### Répéter plusieurs lignes : `:loop N` ... `:loopend`
 
 ```
-:rep 3
+:loop 3
  :say Début du tour
- :rep 2
+ :loop 2
   :say  petit tour
- :erp
-:erp
+ :loopend
+:loopend
 ```
 
-- `:rep 5` répète le bloc 5 fois, `:rep inf` à l'infini (sortez avec `:sys end` dans un `:if`, ou `Ctrl + C`).
-- `:rep 0` saute le bloc.
+- `:loop 5` répète le bloc 5 fois, `:loop inf` à l'infini (sortez avec `:systeen end` dans un `:if`, ou `Ctrl + C`).
+- `:loop 0` saute le bloc.
 - Les boucles peuvent être imbriquées et contenir des `:if` (et inversement).
 - Indentez le contenu d'un espace par niveau, comme pour les `:if`.
 
 ### Sauter vers une ligne
 
 ```
-:rep L5-3
+:loop L5-3
 ```
 
-Retourne à la **ligne 5**, **3 fois** (`:rep L5-inf` pour l'infini).
+Retourne à la **ligne 5**, **3 fois** (`:loop L5-inf` pour l'infini).
 
 Arrêtez un script à tout moment avec `Ctrl + C`.
 
@@ -674,19 +730,26 @@ Quand une ligne échoue, SysTeen affiche le numéro de ligne :
 
 | Message | Cause |
 |---|---|
-| `Variable-404 : la variable 'x' n'existe pas` | variable non créée avec `:var add $x`, `$sys.…` sans `:var sys`, ou `$HOME` dans un `:cmd` |
-| `La variable 'x' existe déjà` | `:var add $x` sur une variable déjà créée (ou `!x` sur une variable normale du même nom) |
-| `Syntaxe : :var add $nom ...` | `:var add nom` sans le `$` ou le `!` devant le nom |
+| `Une variable s'écrit toujours avec son signe` | nom de variable écrit sans `$` ni `!` (`:var add nom`, `; nom`…) : ajoutez le signe |
+| `Variable-404 : la variable 'x' n'existe pas` | variable non créée avec `:var add`, `$sys.…` sans `:var sys`, ou `$HOME` dans un `:cmd` (écrire `$$HOME`) |
+| `… Elle existe en permanente : écrivez !x` | la variable existe, mais avec l'autre signe (`$` / `!`) |
+| `La variable 'x' existe déjà` | `:var add $x` sur une variable temporaire déjà créée |
 | `Nom de variable invalide` | `:var add` avec un nom qui contient autre chose que lettres, chiffres, `_` et `.` |
+| `La commande :save a été supprimée` | utilisez une variable permanente : `:var add !nom` |
+| `La commande :edit a été renommée :txt` | ancien nom de `:txt` |
+| `Le nom 'x' est déjà utilisé par une commande SysTeen` | nom refusé par `:abv` |
+| `:abv sans } fermant` / `:wui sans } fermant` | le `}` seul sur sa ligne manque |
+| `La commande :wait a été renommée :tmp` | ancien nom de `:tmp` |
+| `tkinter est introuvable` | `:wui` a besoin de `tkinter` (voir [Installation](#installation)) |
+| `:wui ouvre une fenêtre, mais aucun affichage graphique` | pas de session graphique (SSH, console) |
+| `Couleur inconnue : 'x'` | couleur de `'Color:…'` invalide (nom anglais ou `#rrggbb`) |
 | `Commande inconnue : :x` | faute de frappe, ou commande qui n'existe pas |
-| `La commande :x a été renommée :y` | script écrit pour une version avant la 0.8.3 (voir les notes de version) |
-| `:if sans :eif` / `:rep sans :erp` / `:abv sans }` | bloc non fermé |
+| `:if sans :elsend` / `:loop sans :loopend` | bloc non fermé |
 | `Accès refusé. Utilisez :del! ou :rmf.` | `:del` sans les droits nécessaires |
 | `... bloquée par la sécurité SysTeen` | suppression de `/` ou du dossier personnel, la protection étant active |
 | `Trop de scripts lancés les uns par les autres` | plus de 5 niveaux de `:go` |
-| `Trop d'abréviations appelées les unes par les autres` | plus de 10 niveaux d'abréviations |
 
-Quelques erreurs sont **fatales** et arrêtent SysTeen avant le début (code de sortie `1`) : fichier introuvable, extension autre que `.st`, première ligne différente de `:sys start`.
+Quelques erreurs sont **fatales** et arrêtent SysTeen avant le début (code de sortie `1`) : fichier introuvable, extension autre que `.st`, première ligne différente de `:systeen start`.
 
 `Ctrl + C` arrête un script (code `130`). Les erreurs d'une ligne ne changent pas le code de sortie.
 
@@ -702,14 +765,14 @@ systeen --check mon_script.st
 
 SysTeen analyse le script **sans rien exécuter** et signale :
 
-- les commandes inconnues, les anciens noms de commandes et les arguments manquants ;
-- les `:if` / `:rep` / `:abv` mal fermés (`:eif`, `:erp` ou `}` oublié ou en trop, `:if+` / `:els` sans `:if`) ;
+- les commandes inconnues et les arguments manquants ;
+- les `:if` / `:loop` / `:abv` mal fermés (`:elsend`, `:loopend` ou `}` oublié ou en trop) ;
 - les variables utilisées avant d'être créées (`:var add`), et `$sys.…` sans `:var sys` ;
 - les fichiers de `:go` introuvables ;
-- une syntaxe invalide pour `:wai`, `:rep`, `:say?`, `:get`, `:abv`… ;
-- en simple conseil : l'indentation, et l'absence de `:sys end` (le script recommence alors depuis la première ligne quand il arrive à la fin).
+- une syntaxe invalide pour `:tmp`, `:loop`, `:say?`, `:read`… ;
+- en simple conseil : l'indentation, et l'absence de `:systeen end` (le script recommence alors depuis la première ligne quand il arrive à la fin).
 
-Le code de retour est `1` s'il y a des erreurs, `0` sinon. L'analyse est statique : elle suit l'ordre des lignes, sans exécuter les `:if` ni les boucles, donc une variable créée dans une branche est considérée comme créée. Les abréviations déjà enregistrées et celles définies plus haut dans le script sont reconnues comme des commandes.
+Le code de retour est `1` s'il y a des erreurs, `0` sinon. L'analyse est statique : elle suit l'ordre des lignes, sans exécuter les `:if` ni les boucles, donc une variable créée dans une branche est considérée comme créée.
 
 ---
 
@@ -763,15 +826,20 @@ Le tag doit correspondre à la variable `VERSION` de `systeen.py`. Toute modific
 | `systeen.py` | Le programme (remplacé par `--maj`) |
 | `README.md` | Ce fichier, à côté de `systeen.py` (affiché par `--readme`) |
 | `/usr/local/bin/systeen` | Lien vers `systeen.py`, créé par `--install` |
-| `/var/lib/systeen/` | Dossier commun (droits `1777`), créé une fois avec `sudo` au premier lancement |
-| `/var/lib/systeen/<utilisateur>/` | Dossier privé de l'utilisateur (droits `700`) : tout ce qui suit |
-| `…/config.json` | Choix de la protection de `/` et du dossier personnel (droits `600`) |
-| `…/nomscript-xxxxxxxx.vars` | Variables permanentes (`!`) d'un script (`xxxxxxxx` : empreinte du chemin du script) |
-| `…/abv/nom.csys` | Une abréviation (`:abv nom { … }`) |
+| `~/.config/systeen/config.json` | Choix de la protection de `/` et du dossier personnel (droits `600`) |
+| `~/.local/share/systeen/vars/*.vars` | Variables **permanentes** (`!nom`), un fichier par script |
+| `~/.local/share/systeen/commands/*.scmd` | Commandes abrégées créées avec `:abv`, un fichier par commande |
+| `~/.local/share/systeen/.migration-0.9.0` | Indique que la migration depuis la 0.8.2 a déjà été faite |
 | `.systeen.py.update.new`, `.README.md.update.new` | Fichiers temporaires pendant une mise à jour |
 | `/tmp/systeen-update-*` | Dossiers temporaires de mise à jour |
 
-Sous `sudo` (commande `:#`), SysTeen utilise toujours le dossier du **vrai** utilisateur (`SUDO_USER`), pas celui de root, et lui rend la propriété des fichiers qu'il écrit.
+Sous `sudo` (commande `:#`), SysTeen utilise toujours la configuration **et les données** du **vrai** utilisateur, pas celles de root.
+
+**Pourquoi `~/.local/share` et pas `/usr` ou `/var` ?** Ces dossiers sont réservés à root : un script lancé en simple utilisateur ne pourrait pas y écrire, et les variables et commandes d'un utilisateur ne doivent pas être partagées avec les autres. `~/.local/share/systeen` est l'emplacement standard (XDG) des données d'une application, et `~/.config/systeen` celui de sa configuration.
+
+### Migration depuis la 0.8.2
+
+Au **premier lancement** de la 0.9.0, SysTeen déplace (`mv`) les anciens fichiers `.vars`, qui étaient à côté des scripts, vers `~/.local/share/systeen/vars/`, et supprime l'ancien registre `vars_registry.json`. Les variables qu'ils contiennent deviennent des variables **permanentes** : dans vos scripts, remplacez `$nom` par `!nom` et supprimez les `:save`.
 
 ---
 
@@ -791,8 +859,8 @@ iwanttouninstallnowthesysteenexecutablethesysteenpackageandthesysteenproject
 
 - `systeen.py` et `README.md` ;
 - la commande `systeen` (`/usr/local/bin/systeen`) si elle a été installée avec `--install` ;
-- votre dossier `/var/lib/systeen/<utilisateur>/` : configuration, fichiers `.vars` et abréviations `.csys` ;
-- `/var/lib/systeen/` lui-même, **seulement s'il est vide** (les données des autres utilisateurs ne sont pas touchées) ;
+- les variables permanentes (`.vars`) et les commandes abrégées (`.scmd`), donc tout `~/.local/share/systeen/` ;
+- la configuration (`~/.config/systeen/`) ;
 - les fichiers de cache et de mise à jour temporaires.
 
 Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le code de `systeen.py` : elle disparaît avec lui.
@@ -804,16 +872,18 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 | Problème | Solution |
 |---|---|
 | `systeen: command not found` | Lancez `python systeen.py --install`. Si vous avez déplacé `systeen.py`, relancez-le aussi. Vérifiez que `/usr/local/bin` est dans votre `PATH` |
-| Le script ne s'arrête jamais | Terminez-le par `:sys end` (sinon il recommence à la ligne 1), ou faites `Ctrl + C` |
-| `La variable 'x' existe déjà` | Le script a recommencé : testez avec `:if not exist $x` avant `:var add $x` (les variables permanentes `!x` n'ont pas ce problème) |
-| `Syntaxe : :var add $nom` | Il faut écrire `$` (normale) ou `!` (permanente) devant le nom : `:var add $nom` |
-| `La commande :x a été renommée :y` | Le script date d'avant la 0.8.3 : remplacez l'ancien nom (voir les [notes de version](#notes-de-version)) |
-| Mot de passe `sudo` demandé au premier lancement | Normal : SysTeen crée `/var/lib/systeen` (une seule fois) |
+| Le script ne s'arrête jamais | Terminez-le par `:systeen end` (sinon il recommence à la ligne 1), ou faites `Ctrl + C` |
+| `La variable 'x' existe déjà` | Le script a recommencé (pas de `:systeen end`) : ajoutez-le, ou créez la variable avec `!` si elle doit survivre |
+| `Une variable s'écrit toujours avec son signe` | Ajoutez `$` (temporaire) ou `!` (permanente) devant le nom, partout où il apparaît |
 | `Variable-404` dans un `:cmd` | Écrivez `$$HOME` (dollar doublé) pour les variables du shell, ou `~` pour le dossier personnel |
-| `$1` ou `${1}` ne donne pas la valeur | La variable doit exister : `:var add $1` puis `:var 1 = valeur`. Écrivez `$1`, pas `$[1]` |
-| `:nom` (abréviation) donne `Variable-404` | Elle utilise les variables du script qui l'appelle : créez-les avant de l'appeler |
+| `$1` ou `${1}` ne donne pas la valeur | La variable doit exister : `:var add $1` puis `:var $1 = valeur`. Écrivez `$1`, pas `$[1]` |
+| `Variable-404 … Elle existe en permanente` | Une variable créée avec `!` s'utilise avec `!` : `!nom` et non `$nom` |
+| Mes anciennes variables `:save` ont disparu | Elles sont maintenant permanentes : utilisez `!nom` (voir [Migration](#migration-depuis-la-082)) |
+| Une variable permanente est vide après avoir déplacé le script | Le fichier est lié au chemin complet du script : copiez `~/.local/share/systeen/vars/<ancien nom>-….vars` sous le nouveau nom, ou refaites la saisie |
+| `Le nom 'x' est déjà utilisé par une commande SysTeen` | Choisissez un autre nom pour `:abv` |
+| `:wui` affiche « tkinter est introuvable » | Installez-le : `sudo apt install python3-tk` (Debian/Ubuntu), `sudo dnf install python3-tkinter` (Fedora), `sudo pacman -S tk` (Arch) |
 | `:go` n'ouvre pas de fenêtre | Il faut une session graphique et l'un des terminaux listés dans [`:go`](#go--lancer-un-second-script-dans-une-nouvelle-fenêtre). Installez par exemple `xterm` |
-| `:#` rejoue des lignes déjà exécutées | Le script repart de la ligne 1 en root : placez `:#` juste après `:sys start` (pour une seule commande, utilisez `:# commande`) |
+| `:#` rejoue des lignes déjà exécutées | Le script repart de la ligne 1 en root : placez `:#` juste après `:systeen start` |
 | `:del` répond « Accès refusé » | Utilisez `:del!` (ou `:rmf`) |
 | `GPG est requis` pendant `--maj` | Installez `gpg` |
 | Signature PGP invalide pendant `--maj` | La release GitHub est mal signée ou a été modifiée : rien n'est installé |
@@ -824,40 +894,17 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 
 ## Notes de version
 
-### 0.8.3
+### 0.9.0
 
-**Commandes renommées sur 3 lettres.** Les anciens noms ne fonctionnent plus : SysTeen répond « La commande :x a été renommée :y » (et `--check` aussi).
-
-| Avant | Maintenant |
-|---|---|
-| `:systeen start` / `:systeen end` | `:sys start` / `:sys end` |
-| `:sayr` | `:syr` |
-| `:sayn?` / `:sayN?` | `:yn?` / `:yN?` |
-| `:math` | `:cal` |
-| `:stop` | `:kil` |
-| `:edit` | `:txt` |
-| `:read` | `:get` |
-| `:copy` / `:paste` | `:cpy` / `:pst` |
-| `:pause` | `:pau` |
-| `:wait` | `:wai` |
-| `:else` / `:elsend` | `:els` / `:eif` |
-| `:loop` / `:loopend` | `:rep` / `:erp` |
-
-Les commandes qui avaient déjà 3 lettres ou moins (`:say`, `:say?`, `:var`, `:cmd`, `:run`, `:go`, `:cd`, `:del`, `:del!`, `:rmf`, `:add`, `:re`, `:off`, `:if`, `:v`, `:#`) ne changent pas.
-
-**Nouveautés**
-
-- **`:abv nom {` ... `}`** : crée une abréviation (un raccourci), enregistrée dans un fichier `.csys` et utilisable dans tous les scripts avec `:nom`.
-- **`:if+`** : « sinon si », avec autant de `:if+` que voulu entre `:if` et `:els`.
-- **`:# commande`** : exécute une seule ligne de commande Linux en root (`:#` seul relance toujours le script en root).
-- **Variables** : plus de `:save`. `:var add $nom` crée une variable normale, `:var add !nom` une variable **permanente**.
-- **Données dans `/var/lib/systeen/<utilisateur>/`** au lieu de `~/.config/systeen/` et du dossier du script : configuration, fichiers `.vars` et abréviations `.csys`. Le dossier est créé une seule fois avec `sudo`. Plus de registre des `.vars` : `--uninstall` supprime simplement ce dossier.
-
-**Migration depuis la 0.8.2**
-
-- Remplacez les anciens noms de commandes dans vos scripts (tableau ci-dessus) et écrivez `:var add $nom` à la place de `:var add nom`. Lancez `systeen --check script.st` pour trouver ce qui reste.
-- Les variables sauvegardées avec `:save` (fichiers `monscript.st.vars` à côté de vos scripts) ne sont pas reprises : recréez-les avec `:var add !nom`. Vous pouvez supprimer ces anciens fichiers et l'ancien dossier `~/.config/systeen/`.
-- Le choix de la sécurité est redemandé une fois (`--change` pour le modifier).
+- **`:wait` devient `:tmp`** (mêmes unités : `sec`, `min`, `h`, `j`, `y`). L'ancien nom affiche un message.
+- **`:wui`** : crée des fenêtres (texte, couleurs, tailles, boutons qui remplissent une variable). Nécessite `tkinter`.
+- **Le signe est obligatoire pour toute variable** : `$nom` (temporaire) ou `!nom` (permanente), à la création, à la modification, à la suppression, après un `;` et dans les textes. Un nom sans signe (`:var add nom`, `:math 1 + 1 ; nom`…) est toujours une erreur, et `--check` le signale. Cela évite toute ambiguïté entre `$nom` et `!nom`.
+- **`:edit` devient `:txt`** (`:txt fichier "texte"` et `:txt +fichier "texte"`). L'ancien nom affiche un message.
+- **Variables permanentes** : `:var add !nom` crée une variable enregistrée automatiquement, qu'on utilise avec `!nom`. `:var add $nom` crée une variable temporaire. **`:save` est supprimée.** Un `$` ou un `!` sans nom derrière est un caractère normal ; `$$` et `!!` donnent un caractère littéral.
+- **`:# commande`** : exécute une commande avec `sudo`, sans relancer le script (`:#` seul relance toujours tout le script en root).
+- **`:abv`** : crée des commandes abrégées persistantes (`:abv nom { ... }`, `:abv rm nom`).
+- **Nouveaux emplacements** : les variables permanentes (`.vars`) et les commandes (`.scmd`) sont dans `~/.local/share/systeen/`, plus à côté des scripts. Migration automatique (`mv`) au premier lancement.
+- `--check` et les conseils d'indentation connaissent les nouveautés (`!nom`, `:abv`, `:txt`).
 
 ### 0.8.2
 
