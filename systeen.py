@@ -22,7 +22,7 @@ import urllib.request
 from pathlib import Path
 
 
-VERSION = "0.9.0"
+VERSION = "0.9.1"
 
 # Phrase à taper pour confirmer la désinstallation
 UNINSTALL_PHRASE = (
@@ -54,15 +54,15 @@ MIGRATION_MARKER = ".migration-0.9.0"
 
 # Commandes connues (utilisé par --check)
 KNOWN_COMMANDS = {
-    "systeen", "#", "v", "var", "say", "sayr", "say?", "sayn?",
-    "sayN?", "math", "cmd", "run", "stop", "go", "cd", "del", "del!", "rmf",
+    "systeen", "#", "v", "var", "say", "sayr", "say?", "Yn?",
+    "yN?", "math", "cmd", "run", "stop", "go", "cd", "del", "del!", "rmf",
     "add", "txt", "abv", "read", "copy", "paste", "pause", "tmp", "wui", "re",
     "off", "if", "else", "elsend", "loop", "loopend",
 }
 
 # Commandes qui exigent au moins un argument (utilisé par --check)
 COMMANDS_WITH_ARGUMENT = {
-    "systeen", "var", "say?", "sayn?", "sayN?", "math", "cmd",
+    "systeen", "var", "say?", "Yn?", "yN?", "math", "cmd",
     "run", "stop", "go", "cd", "del", "del!", "rmf", "add", "txt",
     "abv", "read", "copy", "paste", "tmp", "wui", "if", "loop",
 }
@@ -1721,7 +1721,7 @@ class SysTeen:
                     errors.append((number + offset, text))
 
                 for element in elements:
-                    if element["type"] != "buttons":
+                    if element["type"] not in ("buttons", "input"):
                         continue
 
                     parsed = self.parse_variable_token(element["target"])
@@ -1730,7 +1730,7 @@ class SysTeen:
                         errors.append((
                             number,
                             "nom de variable invalide après le ; d'un "
-                            f"bouton : '{element['target']}'."
+                            f"bouton ou d'une saisie : '{element['target']}'."
                         ))
 
                     elif parsed[0] is None:
@@ -1758,6 +1758,13 @@ class SysTeen:
                 elif command == "wait":
                     errors.append((
                         number, ":wait a été renommée :tmp."
+                    ))
+
+                elif command in ("sayn?", "sayN?"):
+                    errors.append((
+                        number,
+                        f":{command} a été renommée "
+                        f":{'Yn?' if command == 'sayn?' else 'yN?'}."
                     ))
 
                 elif command == "save":
@@ -1838,7 +1845,7 @@ class SysTeen:
                 elif args.strip():
                     errors.append((number, "syntaxe de :var invalide."))
 
-            elif command in ("say?", "sayn?", "sayN?"):
+            elif command in ("say?", "Yn?", "yN?"):
                 if ";" not in args:
                     errors.append((
                         number,
@@ -1911,7 +1918,8 @@ class SysTeen:
 
                 if valid:
                     try:
-                        float(tokens[0])
+                        if float(tokens[0].replace(",", ".")) < 0:
+                            valid = False
 
                     except ValueError:
                         valid = False
@@ -2264,8 +2272,9 @@ class SysTeen:
 
         Retourne (réglages, éléments, problèmes) :
           réglages  : {"height": ..., "width": ...}
-          éléments  : textes (~) et boutons (B~), avec la couleur et la
-                      taille en vigueur au moment où ils sont écrits
+          éléments  : textes (~), champs de saisie (S~) et boutons (B~),
+                      avec la couleur et la taille en vigueur au moment
+                      où ils sont écrits
           problèmes : liste de (numéro de ligne dans le bloc, texte)
         """
 
@@ -2347,7 +2356,7 @@ class SysTeen:
                 })
                 continue
 
-            # B~ oui/non ; $variable
+            # B~ oui/non ; $variable   (boutons)
             if line[:2] in ("B~", "b~"):
                 button = re.match(r"^[Bb]~\s*(.*?)\s*;\s*(\S+)\s*$", line)
 
@@ -2376,6 +2385,27 @@ class SysTeen:
                 })
                 continue
 
+            # S~ texte gris ; $variable   (champ de saisie)
+            if line[:2] in ("S~", "s~"):
+                field = re.match(r"^[Ss]~(.*);\s*(\S+)\s*$", line)
+
+                if field is None:
+                    problems.append((
+                        offset,
+                        "syntaxe de la saisie : "
+                        "S~ Texte indicatif ; $variable"
+                    ))
+                    continue
+
+                elements.append({
+                    "type": "input",
+                    "text": field.group(1).strip(),
+                    "target": field.group(2),
+                    "color": color,
+                    "size": size,
+                })
+                continue
+
             problems.append((
                 offset,
                 f"ligne non reconnue dans :wui : {line[:40]}"
@@ -2386,8 +2416,15 @@ class SysTeen:
     def show_window(self, title_text, body_lines, first_line):
         """
         Ouvre la fenêtre décrite par un bloc :wui et attend qu'elle soit
-        fermée. Un clic sur un bouton enregistre son texte dans la
-        variable du bouton, puis ferme la fenêtre.
+        fermée.
+
+        - Le contenu défile (molette, barre, PageHaut/PageBas, flèches)
+          quand il est plus grand que la fenêtre.
+        - Les textes passent à la ligne selon la largeur réelle de la
+          fenêtre, même si on la redimensionne.
+        - Un clic sur un bouton (ou Entrée dans une saisie) enregistre
+          les saisies et le texte du bouton dans leurs variables, puis
+          ferme la fenêtre. Fermer avec la croix ne change rien.
         """
 
         settings, elements, problems = self.parse_wui(body_lines)
@@ -2404,18 +2441,16 @@ class SysTeen:
         prepared = []
 
         for element in elements:
-            if element["type"] == "text":
-                prepared.append(
-                    dict(element, text=self.interpolate(element["text"]))
+            if element["type"] in ("text", "input"):
+                element = dict(element, text=self.interpolate(element["text"]))
+
+            if element["type"] in ("buttons", "input"):
+                element = dict(
+                    element,
+                    target=self.resolve_variable(element["target"])
                 )
 
-            else:
-                prepared.append(
-                    dict(
-                        element,
-                        target=self.resolve_variable(element["target"])
-                    )
-                )
+            prepared.append(element)
 
         try:
             import tkinter
@@ -2446,7 +2481,27 @@ class SysTeen:
 
         try:
             root.title(title)
-            root.geometry(f"{settings['width']}x{settings['height']}")
+
+            # La fenêtre ne peut pas dépasser l'écran : sinon une partie
+            # du contenu serait hors champ et inatteignable. Elle est
+            # aussi centrée, pour que son coin haut-gauche soit visible.
+            screen_w = root.winfo_screenwidth()
+            screen_h = root.winfo_screenheight()
+
+            win_w = max(min(settings["width"], screen_w - 20), 100)
+            win_h = max(min(settings["height"], screen_h - 100), 100)
+
+            pos_x = max((screen_w - win_w) // 2, 0)
+            pos_y = max((screen_h - win_h) // 2 - 30, 0)
+
+            root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
+
+            if (win_w, win_h) != (settings["width"], settings["height"]):
+                print(
+                    "[SysTeen] :wui : fenêtre réduite à la taille de "
+                    f"l'écran ({screen_w}x{screen_h}) : {win_w}x{win_h} "
+                    "(largeur x hauteur)."
+                )
 
             for element in prepared:
                 if element["color"]:
@@ -2470,43 +2525,234 @@ class SysTeen:
 
                 return fonts[size]
 
-            frame = tkinter.Frame(root)
-            frame.pack(fill="both", expand=True, padx=12, pady=10)
+            margin = 12
 
-            wrap = max(settings["width"] - 40, 100)
+            # --- zone qui défile : canvas + barre + cadre intérieur ---
+            root.rowconfigure(0, weight=1)
+            root.columnconfigure(0, weight=1)
 
-            def choose(target, label):
-                results[target] = label
+            canvas = tkinter.Canvas(
+                root, highlightthickness=0, borderwidth=0
+            )
+
+            # Tant que l'utilisateur n'a pas défilé lui-même, la vue est
+            # maintenue tout en haut (début du contenu).
+            view = {"touched": False}
+
+            def scroll_command(*arguments):
+                view["touched"] = True
+                canvas.yview(*arguments)
+
+            scrollbar = tkinter.Scrollbar(
+                root, orient="vertical", command=scroll_command
+            )
+
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            canvas.grid(row=0, column=0, sticky="nsew")
+            scrollbar.grid(row=0, column=1, sticky="ns")
+
+            frame = tkinter.Frame(canvas)
+
+            window = canvas.create_window((0, 0), window=frame, anchor="nw")
+
+            labels = []     # textes : retour à la ligne à recalculer
+            groups = []     # rangées de boutons : à recaser
+
+            def flow(buttons, available):
+                """Range les boutons en lignes selon la largeur."""
+
+                for button in buttons:
+                    button.grid_forget()
+
+                row = column = used = 0
+
+                for button in buttons:
+                    needed = button.winfo_reqwidth() + 8
+
+                    if column > 0 and used + needed > available:
+                        row += 1
+                        column = 0
+                        used = 0
+
+                    button.grid(
+                        row=row, column=column, padx=4, pady=3, sticky="w"
+                    )
+
+                    used += needed
+                    column += 1
+
+            def relayout(width):
+                inner = max(width - 2 * margin, 60)
+
+                for label in labels:
+                    label.configure(wraplength=inner)
+
+                for buttons in groups:
+                    flow(buttons, inner)
+
+            def keep_top():
+                if not view["touched"]:
+                    canvas.yview_moveto(0)
+
+            def on_canvas(event):
+                canvas.itemconfigure(window, width=event.width)
+                relayout(event.width)
+                keep_top()
+
+            def on_frame(event):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                keep_top()
+
+            canvas.bind("<Configure>", on_canvas)
+            frame.bind("<Configure>", on_frame)
+
+            def scroll(event):
+                view["touched"] = True
+
+                number = getattr(event, "num", None)
+
+                if number == 4:
+                    canvas.yview_scroll(-3, "units")
+
+                elif number == 5:
+                    canvas.yview_scroll(3, "units")
+
+                elif getattr(event, "delta", 0):
+                    canvas.yview_scroll(
+                        -1 if event.delta > 0 else 1, "units"
+                    )
+
+            root.bind_all("<MouseWheel>", scroll)
+            root.bind_all("<Button-4>", scroll)
+            root.bind_all("<Button-5>", scroll)
+            def move(amount, unit):
+                view["touched"] = True
+                canvas.yview_scroll(amount, unit)
+
+            root.bind_all("<Prior>", lambda e: move(-1, "pages"))
+            root.bind_all("<Next>", lambda e: move(1, "pages"))
+            root.bind_all("<Up>", lambda e: move(-1, "units"))
+            root.bind_all("<Down>", lambda e: move(1, "units"))
+
+            # --- contenu ---
+            inputs = []     # (variable, fonction qui donne le texte saisi)
+
+            def finish(target=None, label=None):
+                for variable, getter in inputs:
+                    results[variable] = getter()
+
+                if target is not None:
+                    results[target] = label
+
                 root.destroy()
 
-            for element in prepared:
-                options = {"font": font_for(element["size"])}
+            def add_buttons(texts, size, color, target):
+                row = tkinter.Frame(frame)
+                row.pack(anchor="w", fill="x", padx=margin, pady=4)
 
-                if element["color"]:
-                    options["fg"] = element["color"]
+                options = {"font": font_for(size)}
+
+                if color:
+                    options["fg"] = color
+
+                buttons = []
+
+                for text in texts:
+                    buttons.append(tkinter.Button(
+                        row,
+                        text=text,
+                        command=lambda t=target, l=text: finish(t, l),
+                        **options
+                    ))
+
+                groups.append(buttons)
+
+                flow(buttons, win_w)
+
+            has_buttons = False
+
+            for element in prepared:
+                font = font_for(element["size"])
 
                 if element["type"] == "text":
-                    tkinter.Label(
+                    options = {"font": font}
+
+                    if element["color"]:
+                        options["fg"] = element["color"]
+
+                    label = tkinter.Label(
                         frame,
                         text=element["text"],
                         anchor="w",
                         justify="left",
-                        wraplength=wrap,
+                        wraplength=max(win_w - 3 * margin, 60),
                         **options
-                    ).pack(fill="x", pady=2)
+                    )
+
+                    label.pack(fill="x", padx=margin, pady=2)
+
+                    labels.append(label)
+
+                elif element["type"] == "buttons":
+                    has_buttons = True
+
+                    add_buttons(
+                        element["labels"], element["size"],
+                        element["color"], element["target"]
+                    )
 
                 else:
-                    row = tkinter.Frame(frame)
-                    row.pack(anchor="w", pady=6)
+                    # champ de saisie : case blanche, texte indicatif gris
+                    normal = element["color"] or "black"
+                    hint = element["text"]
 
-                    for label in element["labels"]:
-                        tkinter.Button(
-                            row,
-                            text=label,
-                            command=lambda t=element["target"],
-                            l=label: choose(t, l),
-                            **options
-                        ).pack(side="left", padx=4)
+                    entry = tkinter.Entry(
+                        frame,
+                        font=font,
+                        bg="white",
+                        fg=normal,
+                        insertbackground="black"
+                    )
+
+                    entry.pack(fill="x", padx=margin, pady=4)
+
+                    state = {"hint": False}
+
+                    def show_hint(entry=entry, hint=hint, state=state):
+                        if hint and not entry.get():
+                            entry.insert(0, hint)
+                            entry.configure(fg="grey")
+                            state["hint"] = True
+
+                    def hide_hint(event, entry=entry, normal=normal, state=state):
+                        if state["hint"]:
+                            entry.delete(0, "end")
+                            entry.configure(fg=normal)
+                            state["hint"] = False
+
+                    show_hint()
+
+                    entry.bind("<FocusIn>", hide_hint)
+                    entry.bind("<FocusOut>", lambda event, f=show_hint: f())
+                    entry.bind("<Return>", lambda event: finish())
+
+                    inputs.append((
+                        element["target"],
+                        lambda entry=entry, state=state:
+                            "" if state["hint"] else entry.get()
+                    ))
+
+            # des saisies sans bouton : un bouton OK est ajouté
+            if inputs and not has_buttons:
+                add_buttons(["OK"], 12, None, None)
+
+            relayout(win_w)
+
+            # mise en page terminée : le contenu commence tout en haut
+            root.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.yview_moveto(0)
 
             # la fenêtre passe devant les autres
             root.lift()
@@ -2525,8 +2771,8 @@ class SysTeen:
             except Exception:
                 pass
 
-        for (scope, name), label in results.items():
-            self.write_variable(scope, name, label)
+        for (scope, name), value in results.items():
+            self.write_variable(scope, name, value)
 
     def command_wui(self, line_index, content):
         """
@@ -2800,14 +3046,14 @@ class SysTeen:
 
     def command_say_yes_no(self, content, default_yes):
         """
-        :sayn? question ; variable   -> (Y/n) : Entrée = y
-        :sayN? question ; variable   -> (y/N) : Entrée = n
+        :Yn? question ; $variable   -> (Y/n) : Entrée = y
+        :yN? question ; $variable   -> (y/N) : Entrée = n
 
         Seules les réponses y ou n sont acceptées (majuscules
         tolérées). La variable reçoit "y" ou "n".
         """
 
-        name = ":sayn?" if default_yes else ":sayN?"
+        name = ":Yn?" if default_yes else ":yN?"
 
         if ";" not in content:
             raise SysTeenError(
@@ -3609,6 +3855,8 @@ class SysTeen:
     # =========================================================
 
     def command_tmp(self, content):
+        """:tmp nombre unité   (virgule ou point : 0,6 sec / 0.6 sec)"""
+
         parts = content.strip().lower().split()
 
         if len(parts) != 2:
@@ -3617,9 +3865,12 @@ class SysTeen:
             )
 
         try:
-            amount = float(parts[0])
+            amount = float(parts[0].replace(",", "."))
 
         except ValueError:
+            raise SysTeenError("Nombre invalide.")
+
+        if amount < 0:
             raise SysTeenError("Nombre invalide.")
 
         unit = parts[1]
@@ -5081,12 +5332,18 @@ class SysTeen:
 
             return line_index + 1
 
-        if command == "sayn?":
+        if command in ("sayn?", "sayN?"):
+            raise SysTeenError(
+                "Les commandes :sayn? et :sayN? ont été renommées "
+                ":Yn? et :yN?."
+            )
+
+        if command == "Yn?":
             self.command_say_yes_no(args, default_yes=True)
 
             return line_index + 1
 
-        if command == "sayN?":
+        if command == "yN?":
             self.command_say_yes_no(args, default_yes=False)
 
             return line_index + 1
