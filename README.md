@@ -3,7 +3,7 @@
 **SysTeen** est un petit langage de script pour Linux, simple et lisible, interprété par `systeen.py` (Python 3).
 Il sert à automatiser des tâches système : fichiers, variables, commandes Linux, boucles, conditions, scripts parallèles…
 
-> Version actuelle : **0.9.0**
+> Version actuelle : **0.9.1**
 > Projet : [Lemillitaire3330/SysTeen](https://github.com/Lemillitaire3330/SysTeen)
 
 ---
@@ -123,7 +123,7 @@ Ce script demande un dossier, affiche son nombre d'éléments, puis le copie dan
 :cmd ls $dossier | wc -l ; $nombre
 :say $nombre élément(s) dans $dossier
 
-:sayN? Lancer la sauvegarde ? ; $reponse
+:yN? Lancer la sauvegarde ? ; $reponse
 :if $reponse == y
  :copy $dossier
  :paste sauvegardes/$dossier-$sys.date
@@ -199,8 +199,8 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 | `:say texte` | Affiche du texte |
 | `:sayr texte` | Remplace la dernière ligne affichée |
 | `:say? question ; $variable` | Pose une question |
-| `:sayn? question ; $variable` | Question y/n, Entrée = y |
-| `:sayN? question ; $variable` | Question y/n, Entrée = n |
+| `:Yn? question ; $variable` | Question y/n, Entrée = y |
+| `:yN? question ; $variable` | Question y/n, Entrée = n |
 | `:math expression [; $variable]` | Calcule |
 | `:cmd commande [; $variable]` | Exécute une commande Linux (et garde son résultat) |
 | `:pause [message]` | Attend la touche Entrée |
@@ -215,7 +215,7 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 | `:abv nom {` ... `}` | Crée une commande abrégée `:nom` (enregistrée pour tous les scripts) |
 | `:abv rm nom` | Supprime une commande abrégée |
 | `:del chemin` / `:del! chemin` / `:rmf chemin` | Supprime (normal / avec sudo si refusé / sudo direct) |
-| `:tmp nombre unité` | Pause (`sec`, `min`, `h`, `j`, `y`) |
+| `:tmp nombre unité` | Pause (`sec`, `min`, `h`, `j`, `y` ; virgule acceptée : `0,6 sec`) |
 | `:re` / `:off` | Redémarre / éteint l'ordinateur |
 | `:if condition` ... `:else` ... `:elsend` | Condition |
 | `:loop N :commande` | Répète une commande N fois (ou `inf`) |
@@ -241,8 +241,8 @@ Il n'est pas définitif : `python systeen.py --change` permet de le modifier à 
 | `:say texte` | Affiche un texte (les `$variables` sont remplacées) |
 | `:sayr texte` | **Remplace la dernière ligne affichée** par ce texte (chargements, compteurs…) |
 | `:say? question ; $variable` | Pose une question et stocke la réponse dans une variable **déjà créée** |
-| `:sayn? question ; $variable` | Question à réponse `y` ou `n` uniquement, affichée `(Y/n)` : **Entrée = y** |
-| `:sayN? question ; $variable` | Pareil, affichée `(y/N)` : **Entrée = n** (choix recommandé pour les actions risquées) |
+| `:Yn? question ; $variable` | Question à réponse `y` ou `n` uniquement, affichée `(Y/n)` : **Entrée = y** |
+| `:yN? question ; $variable` | Pareil, affichée `(y/N)` : **Entrée = n** (choix recommandé pour les actions risquées) |
 
 Exemple de chargement avec `:sayr` :
 
@@ -260,7 +260,9 @@ Exemple de chargement avec `:sayr` :
 - Il faut un vrai terminal. Si la sortie est redirigée vers un fichier ou un tube (`systeen script.st > sortie.txt`), le texte est simplement ajouté à la suite.
 - Une ligne plus longue que la largeur du terminal (qui passe à la ligne) n'est remplacée que sur sa dernière ligne d'écran : gardez les textes de `:sayr` courts.
 
-Avec `:sayn?` et `:sayN?`, la variable reçoit `y` ou `n`, ce qui se teste avec `:if $variable == y`. Toute autre réponse est refusée et la question est reposée.
+Le nom indique la réponse par défaut : le **Y majuscule** de `:Yn?` (« Yes ») est celui qui se choisit en appuyant sur Entrée, le **N majuscule** de `:yN?` (« No ») aussi. Les deux commandes se distinguent donc par leur casse.
+
+Avec `:Yn?` et `:yN?`, la variable reçoit `y` ou `n`, ce qui se teste avec `:if $variable == y`. Toute autre réponse est refusée et la question est reposée.
 
 Pour les trois commandes de question, le **dernier** `;` de la ligne sépare la question de la variable : la question peut donc elle-même contenir des `;`.
 
@@ -298,7 +300,7 @@ Ligne 3"
 ```
 
 > Le texte d'un `:txt` ne peut pas contenir de guillemet `"`.
-> L'ancienne commande `:crea` a été renommée `:add`, `:edit` est devenue `:txt` et `:wait` est devenue `:tmp`.
+> L'ancienne commande `:crea` a été renommée `:add`, `:edit` est devenue `:txt`, `:wait` est devenue `:tmp`, `:sayn?` est devenue `:Yn?` et `:sayN?` est devenue `:yN?`.
 
 Exemple de `:copy` / `:paste` :
 
@@ -322,7 +324,7 @@ Exemple de `:copy` / `:paste` :
 | `:pause` / `:pause message` | Attend que l'utilisateur appuie sur Entrée |
 | `:run programme` | Lance un programme en arrière-plan |
 | `:stop programme` | Arrête un programme par son nom (`pkill -x`) |
-| `:tmp nombre unité` | Pause. Unités : `sec`, `min`, `h`, `j`, `y` |
+| `:tmp nombre unité` | Pause. Unités : `sec`, `min`, `h`, `j`, `y`. Le nombre peut avoir une **virgule ou un point** : `:tmp 0,6 sec`, `:tmp 1.5 sec` |
 | `:re` | Redémarre l'ordinateur |
 | `:off` | Éteint l'ordinateur |
 
@@ -427,7 +429,7 @@ SysTeen a deux sortes de variables, qu'on distingue par leur signe :
 - **Le signe est obligatoire, partout et tout le temps** : à la création (`:var add $nom`), à la modification (`:var $nom = …`), à la suppression (`:var rm $nom`), après un `;` et dans les textes. Un nom tout seul (`:var add nom`, `; nom`, `:var rm nom`) est toujours une erreur, qui indique le signe à écrire : c'est ce qui permet de distinguer `$nom` de `!nom` sans jamais hésiter.
 - Un nom peut contenir lettres, chiffres, `_` et `.`, et peut **commencer par un chiffre** (`:var add $1` puis `$1` ou `${1}`). `:var add` refuse tout autre nom (crochets, `-`, espaces…), car on ne pourrait jamais l'écrire ensuite.
 - `$nom` et `!nom` sont **deux variables distinctes** : on peut avoir les deux. Se tromper de signe donne une erreur qui indique le bon (« Elle existe en permanente : écrivez !nom »).
-- Les commandes qui prennent une variable après un `;` (`:say?`, `:sayn?`, `:sayN?`, `:math`, `:cmd`, `:read`) veulent elle aussi **le signe** : `; $nom` ou `; !nom`.
+- Les commandes qui prennent une variable après un `;` (`:say?`, `:Yn?`, `:yN?`, `:math`, `:cmd`, `:read`) veulent elle aussi **le signe** : `; $nom` ou `; !nom`.
 - Comme le point fait partie du nom, `$nom.txt` cherche la variable `nom.txt` : écrivez **`${nom}.txt`** (ou `!{nom}.txt`) pour délimiter le nom.
 - Les crochets des syntaxes de ce document (`[nom]`, `[variable]`) indiquent seulement où mettre une valeur : ils ne s'écrivent pas. On écrit `$nom`, pas `$[nom]`.
 - Utiliser une variable qui n'existe pas affiche une erreur `Variable-404`.
@@ -467,7 +469,7 @@ Ces valeurs sont lues au moment où `:var sys` s'exécute. Relancez `:var sys` p
 
 ### Où le `$` et le `!` sont remplacés
 
-SysTeen remplace `$nom` / `${nom}` et `!nom` / `!{nom}` dans : `:say`, `:sayr`, la question de `:say?` / `:sayn?` / `:sayN?`, `:math`, `:cmd`, `:#`, `:run`, `:stop`, `:go`, `:cd`, `:add`, `:txt` (nom et texte), `:read`, `:copy`, `:paste`, `:pause`, `:del`, `:del!`, `:rmf`, la valeur de `:var nom = valeur` et les conditions de `:if`.
+SysTeen remplace `$nom` / `${nom}` et `!nom` / `!{nom}` dans : `:say`, `:sayr`, la question de `:say?` / `:Yn?` / `:yN?`, `:math`, `:cmd`, `:#`, `:run`, `:stop`, `:go`, `:cd`, `:add`, `:txt` (nom et texte), `:read`, `:copy`, `:paste`, `:pause`, `:del`, `:del!`, `:rmf`, la valeur de `:var nom = valeur` et les conditions de `:if`.
 
 Il n'est **pas** remplacé dans `:tmp`, `:v`, ni pour les noms de variables eux-mêmes (`:var add $nom`, la variable après un `;`).
 
@@ -574,28 +576,35 @@ Une variable créée avec `!` est **enregistrée à chaque modification** (pas s
  ~Une deuxième ligne
  'Color:blue'
  ~Une ligne en bleu
+ S~Saisissez ici votre prénom ; $nom
  B~ oui/non/others ; !choix
 }
-:say Vous avez choisi : !choix
+:say $nom a choisi : !choix
 :systeen end
 ```
 
 | Ligne du bloc | Effet |
 |---|---|
 | `:wui "titre" {` | Ouvre le bloc. Le titre devient celui de la fenêtre (les variables y sont remplacées) |
-| `'hauteur/largeur'` | Taille de la fenêtre en pixels : `'300/500'` = 300 de haut, 500 de large (de 50 à 5000). Par défaut `300/400`. Si plusieurs lignes en donnent une, la dernière compte |
+| `'hauteur/largeur'` | Taille de la fenêtre en pixels : `'300/500'` = 300 de haut, 500 de large (de 50 à 5000). Par défaut `300/400`. Si plusieurs lignes en donnent une, la dernière compte. **Une fenêtre plus grande que l'écran est réduite à la taille de l'écran** (un message l'indique) |
 | `'Color:couleur'` | Couleur du texte et des boutons **qui suivent** : un nom anglais (`red`, `blue`, `darkgreen`…) ou un code `#rrggbb`. `'Couleur:…'` fonctionne aussi |
 | `'Size:taille'` | Taille du texte et des boutons **qui suivent**, de 1 à 200 (par défaut 12). `'Taille:…'` fonctionne aussi |
 | `~texte` | Une ligne de texte (le `~` est obligatoire). `$nom` et `!nom` y sont remplacés. `~` seul donne une ligne vide |
-| `B~ oui/non/others ; $variable` | Une rangée de boutons, un par mot séparé par `/`. Le clic met le texte du bouton dans la variable et **ferme la fenêtre** |
+| `B~ oui/non/others ; $variable` | Une rangée de boutons, un par mot séparé par `/` (ils passent à la ligne suivante si la fenêtre est étroite). Le clic met le texte du bouton dans la variable et **ferme la fenêtre** |
+| `S~Texte indicatif ; $variable` | Un **champ de saisie** : une case blanche où le texte indicatif apparaît en **gris** et disparaît dès qu'on clique dedans. Ce qui est tapé est mis dans la variable quand on valide |
 | `}` | Ferme le bloc (seul sur sa ligne) |
 
 - **Les paramètres changent en cours de route** : `'Color:…'` et `'Size:…'` s'appliquent à tout ce qui est écrit ensuite, jusqu'au prochain changement. Dans l'exemple, les deux premiers textes sont rouges et le reste est bleu.
 - **La variable d'un bouton** est écrite comme partout, avec son signe (`$nom` ou `!nom`), et doit déjà exister. Avec une variable permanente (`!nom`), le choix est même retrouvé au lancement suivant.
-- **Fermer la fenêtre avec la croix**, sans cliquer sur un bouton, ne modifie aucune variable.
+- **Valider** : un clic sur un bouton, ou la touche **Entrée** dans un champ de saisie, enregistre **toutes** les saisies et le texte du bouton cliqué dans leurs variables, puis ferme la fenêtre. Un champ laissé vide donne une variable vide (testez-la avec `:if empty $variable`).
+- **Sans bouton**, si la fenêtre contient des saisies, un bouton **OK** est ajouté automatiquement.
+- **Fermer la fenêtre avec la croix**, sans valider, ne modifie aucune variable.
 - **Avec plusieurs rangées `B~`**, un clic sur n'importe quel bouton ferme la fenêtre, et seule la variable du bouton cliqué est modifiée.
 - **Tout est vérifié avant l'ouverture** (variables, couleur). En cas d'erreur, aucune fenêtre n'apparaît et le script continue après le `}`.
-- Les lignes vides et celles qui commencent par `#` sont ignorées. Les lignes du bloc ne sont pas des commandes (pas de `:` devant) : décalez-les d'un espace, comme dans les autres blocs. Un texte trop long passe à la ligne automatiquement.
+- Les lignes vides et celles qui commencent par `#` sont ignorées. Les lignes du bloc ne sont pas des commandes (pas de `:` devant) : décalez-les d'un espace, comme dans les autres blocs.
+- **La fenêtre reste dans l'écran** : si la taille demandée dépasse la résolution de l'écran, elle est réduite (par exemple `2000/3000` sur un écran 1366×768 donne une fenêtre un peu plus petite que l'écran) et **centrée**, pour qu'aucune partie ne soit hors champ. Le contenu qui ne tient pas défile.
+- **Elle s'ouvre toujours tout en haut** : le début du contenu est visible au lancement. La vue ne bouge que quand vous défilez vous-même.
+- **Retour à la ligne et défilement** : les textes passent à la ligne selon la **largeur réelle** de la fenêtre (même si vous l'agrandissez ou la réduisez). Quand le contenu est plus grand que la fenêtre, une **barre de défilement** apparaît à droite : on défile avec la molette, la barre, `PageHaut` / `PageBas` ou les flèches `↑` `↓`, jusqu'au dernier bouton.
 - Il faut `tkinter` et une session graphique (voir [Installation](#installation)). Sans eux, `:wui` affiche une erreur claire, saute le bloc et le script continue.
 - `--check` vérifie les blocs `:wui` (lignes non reconnues, dimensions, variables, `}` manquant).
 
@@ -740,6 +749,7 @@ Quand une ligne échoue, SysTeen affiche le numéro de ligne :
 | `Le nom 'x' est déjà utilisé par une commande SysTeen` | nom refusé par `:abv` |
 | `:abv sans } fermant` / `:wui sans } fermant` | le `}` seul sur sa ligne manque |
 | `La commande :wait a été renommée :tmp` | ancien nom de `:tmp` |
+| `Les commandes :sayn? et :sayN? ont été renommées :Yn? et :yN?` | anciens noms de `:Yn?` et `:yN?` |
 | `tkinter est introuvable` | `:wui` a besoin de `tkinter` (voir [Installation](#installation)) |
 | `:wui ouvre une fenêtre, mais aucun affichage graphique` | pas de session graphique (SSH, console) |
 | `Couleur inconnue : 'x'` | couleur de `'Color:…'` invalide (nom anglais ou `#rrggbb`) |
@@ -893,6 +903,14 @@ Vos scripts `.st` ne sont **jamais** touchés. La clé PGP n'existe que dans le 
 ---
 
 ## Notes de version
+
+### 0.9.1
+
+- **`:wui`** : les textes passent maintenant à la ligne selon la largeur réelle de la fenêtre, le contenu **défile** (molette, barre, `PageHaut`/`PageBas`, flèches) quand il dépasse, et les boutons se répartissent sur plusieurs lignes si la fenêtre est étroite.
+- **`:wui` : champs de saisie** avec `S~Texte indicatif ; $variable` : case blanche, texte indicatif en gris, validation par un bouton ou la touche Entrée (un bouton OK est ajouté s'il n'y en a pas).
+- **`:wui` : fenêtre plus grande que l'écran** : elle est réduite à la taille de l'écran et centrée (avant, une partie du contenu pouvait être hors champ). Elle s'ouvre aussi toujours **tout en haut** du contenu.
+- **`:sayn?` devient `:Yn?`** et **`:sayN?` devient `:yN?`**. Les anciens noms affichent un message.
+- **`:tmp` accepte la virgule** : `:tmp 0,6 sec` (le point reste accepté). Un nombre négatif est refusé.
 
 ### 0.9.0
 
